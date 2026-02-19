@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Register Student - RFID Attendance</title>
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <!-- Header -->
+  <header class="header">
+    <div class="header-content">
+      <h1 class="header-title">
+        📚 RFID Attendance
+      </h1>
+      <nav class="header-nav">
+        <a href="index.html" class="nav-btn">Dashboard</a>
+        <a href="register.html" class="nav-btn active">Register</a>
+        <a href="scanner.html" class="nav-btn">Scanner</a>
+        <a href="history.html" class="nav-btn">History</a>
+      </nav>
+    </div>
+  </header>
+
+  <!-- Main Content -->
+  <main class="container">
+    <h1 class="page-title">Register Student</h1>
+    <p class="page-subtitle">Add a new student to the RFID attendance system</p>
+
+    <!-- Alert Container -->
+    <div id="alertContainer"></div>
+
+    <!-- Registration Form -->
+    <div class="card">
+      <h2 class="card-title">Student Information</h2>
+      <form id="registrationForm">
+        <div class="form-grid">
+          <div class="form-group">
+            <label class="form-label" for="studentId">Student ID *</label>
+            <input 
+              type="text" 
+              id="studentId" 
+              class="form-input" 
+              placeholder="e.g., 2024-001"
+              required
+            >
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="cardUid">Card UID *</label>
+            <div style="display: flex; gap: 0.5rem;">
+              <input 
+                type="text" 
+                id="cardUid" 
+                class="form-input" 
+                placeholder="e.g., 61 64 96 17"
+                required
+                style="flex: 1;"
+              >
+              <button type="button" onclick="startUIDCapture()" class="btn btn-secondary" id="captureBtn">
+                📡 Scan
+              </button>
+            </div>
+            <small style="color: var(--text-light); display: block; margin-top: 0.25rem;">
+              Click "Scan" to capture UID from RFID card
+            </small>
+          </div>
+
+          <div class="form-group form-grid-full">
+            <label class="form-label" for="fullname">Full Name *</label>
+            <input 
+              type="text" 
+              id="fullname" 
+              class="form-input" 
+              placeholder="e.g., Juan Dela Cruz"
+              required
+            >
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="grade">Grade *</label>
+            <select id="grade" class="form-input" required>
+              <option value="">Select Grade</option>
+              <option value="7">Grade 7</option>
+              <option value="8">Grade 8</option>
+              <option value="9">Grade 9</option>
+              <option value="10">Grade 10</option>
+              <option value="11">Grade 11</option>
+              <option value="12">Grade 12</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="section">Section *</label>
+            <input 
+              type="text" 
+              id="section" 
+              class="form-input" 
+              placeholder="e.g., A, B, Einstein"
+              required
+            >
+          </div>
+        </div>
+
+        <div style="display: flex; gap: 1rem; margin-top: 1.5rem;">
+          <button type="submit" class="btn btn-primary" id="submitBtn">
+            ✅ Register Student
+          </button>
+          <button type="button" onclick="resetForm()" class="btn btn-outline">
+            🔄 Clear Form
+          </button>
+        </div>
+      </form>
+    </div>
+
+    <!-- Registered Students -->
+    <div class="card">
+      <h2 class="card-title">Registered Students</h2>
+      <div id="studentsContainer">
+        <div class="loading">Loading students...</div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    // API Base URL
+    const API_URL = 'http://localhost:3000/api';
+
+    let isCapturing = false;
+    let eventSource = null;
+
+    // Start UID capture from RFID scanner
+    function startUIDCapture() {
+      if (isCapturing) {
+        stopUIDCapture();
+        return;
+      }
+
+      isCapturing = true;
+      const captureBtn = document.getElementById('captureBtn');
+      const cardUidInput = document.getElementById('cardUid');
+      
+      captureBtn.textContent = '⏹️ Stop';
+      captureBtn.classList.remove('btn-secondary');
+      captureBtn.classList.add('btn-danger');
+      cardUidInput.placeholder = 'Waiting for card scan...';
+      cardUidInput.classList.add('pulse');
+
+      showAlert('info', 'Ready to scan! Please tap your RFID card on the reader.');
+
+      // Listen to SSE for scans
+      eventSource = new EventSource(`${API_URL}/scan-events`);
+      
+      eventSource.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        if (data.uid) {
+          cardUidInput.value = data.uid;
+          stopUIDCapture();
+          showAlert('success', `Card UID captured: ${data.uid}`);
+        }
+      };
+
+      eventSource.onerror = () => {
+        stopUIDCapture();
+        showAlert('error', 'Connection to scanner lost. Please try again.');
+      };
+    }
+
+    // Stop UID capture
+    function stopUIDCapture() {
+      isCapturing = false;
+      const captureBtn = document.getElementById('captureBtn');
+      const cardUidInput = document.getElementById('cardUid');
+      
+      captureBtn.textContent = '📡 Scan';
+      captureBtn.classList.remove('btn-danger');
+      captureBtn.classList.add('btn-secondary');
+      cardUidInput.placeholder = 'e.g., 61 64 96 17';
+      cardUidInput.classList.remove('pulse');
+
+      if (eventSource) {
+        eventSource.close();
+        eventSource = null;
+      }
+    }
+
+    // Handle form submission
+    document.getElementById('registrationForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      
+      const submitBtn = document.getElementById('submitBtn');
+      submitBtn.disabled = true;
+      submitBtn.innerHTML = '<span class="spinner"></span> Registering...';
+
+      const formData = {
+        student_id: document.getElementById('studentId').value.trim(),
+        card_uid: document.getElementById('cardUid').value.trim(),
+        fullname: document.getElementById('fullname').value.trim(),
+        grade: document.getElementById('grade').value,
+        section: document.getElementById('section').value.trim()
+      };
+
+      try {
+        const response = await fetch(`${API_URL}/students`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(formData)
+        });
+
+        const result = await response.json();
+
+        if (response.ok) {
+          showAlert('success', `✅ ${formData.fullname} has been registered successfully!`);
+          resetForm();
+          loadStudents(); // Refresh the list
+        } else {
+          showAlert('error', result.error || 'Failed to register student');
+        }
+      } catch (error) {
+        console.error('Error:', error);
+        showAlert('error', 'Failed to connect to server. Please make sure it is running.');
+      } finally {
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = '✅ Register Student';
+      }
+    });
+
+    // Show alert message
+    function showAlert(type, message) {
+      const alertContainer = document.getElementById('alertContainer');
+      const alertClass = `alert-${type}`;
+      
+      alertContainer.innerHTML = `
+        <div class="alert ${alertClass}">
+          <div>${message}</div>
+        </div>
+      `;
+
+      // Auto-hide after 5 seconds
+      setTimeout(() => {
+        alertContainer.innerHTML = '';
+      }, 5000);
+    }
+
+    // Reset form
+    function resetForm() {
+      document.getElementById('registrationForm').reset();
+      stopUIDCapture();
+    }
+
+    // Load registered students
+    async function loadStudents() {
+      try {
+        const response = await fetch(`${API_URL}/students`);
+        const students = await response.json();
+        
+        const container = document.getElementById('studentsContainer');
+        
+        if (students.length === 0) {
+          container.innerHTML = `
+            <div class="empty-state">
+              <div class="empty-state-icon">👥</div>
+              <div class="empty-state-text">No students registered yet</div>
+            </div>
+          `;
+          return;
+        }
+
+        container.innerHTML = `
+          <div class="table-container">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th>Student ID</th>
+                  <th>Name</th>
+                  <th class="hide-mobile">Card UID</th>
+                  <th>Grade</th>
+                  <th class="hide-mobile">Section</th>
+                  <th class="hide-mobile">Registered</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${students.map(student => `
+                  <tr>
+                    <td><strong>${student.student_id}</strong></td>
+                    <td>${student.fullname}</td>
+                    <td class="hide-mobile"><code>${student.card_uid}</code></td>
+                    <td><span class="badge badge-primary">Grade ${student.grade}</span></td>
+                    <td class="hide-mobile">${student.section}</td>
+                    <td class="hide-mobile">${student.registered_at ? new Date(student.registered_at).toLocaleDateString() : 'N/A'}</td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+          <div style="margin-top: 1rem; color: var(--text-light);">
+            Total: ${students.length} student${students.length !== 1 ? 's' : ''}
+          </div>
+        `;
+      } catch (error) {
+        console.error('Error loading students:', error);
+        document.getElementById('studentsContainer').innerHTML = `
+          <div class="alert alert-error">
+            Failed to load students. Please make sure the server is running.
+          </div>
+        `;
+      }
+    }
+
+    // Initialize
+    loadStudents();
+
+    // Refresh students list every 10 seconds
+    setInterval(loadStudents, 10000);
+
+    // Clean up event source on page unload
+    window.addEventListener('beforeunload', () => {
+      if (eventSource) {
+        eventSource.close();
+      }
+    });
+  </script>
+</body>
+</html>
