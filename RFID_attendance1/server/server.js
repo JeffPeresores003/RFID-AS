@@ -23,6 +23,32 @@ let sseClients = [];
 // ===== SERIAL PORT SETUP =====
 let serialPort = null;
 let parser = null;
+let reconnectInterval = null;
+let isReconnecting = false;
+let reconnectAttempts = 0;
+const RECONNECT_DELAY = 1500; // 1.5 seconds
+
+function autoResetArduino() {
+  if (!serialPort || !serialPort.isOpen) return;
+
+  serialPort.set({ dtr: false }, (err) => {
+    if (err) {
+      console.log(`DTR low failed: ${err.message}`);
+      return;
+    }
+
+    setTimeout(() => {
+      if (!serialPort || !serialPort.isOpen) return;
+      serialPort.set({ dtr: true }, (setErr) => {
+        if (setErr) {
+          console.log(`DTR high failed: ${setErr.message}`);
+          return;
+        }
+        console.log('✓ Arduino auto-reset triggered (DTR toggle)');
+      });
+    }, 200);
+  });
+}
 
 // Function to list available ports
 async function listPorts() {
@@ -56,6 +82,9 @@ async function initSerialPort() {
 
     if (!arduinoPort) {
       console.log('\n⚠️  No serial ports found. Please connect your Arduino.');
+      if (!isReconnecting) {
+        attemptReconnect();
+      }
       return;
     }
 
@@ -70,11 +99,24 @@ async function initSerialPort() {
 
     serialPort.on('open', () => {
       console.log('✓ Serial port opened successfully\n');
+      autoResetArduino();
+      reconnectAttempts = 0; // Reset reconnect attempts on successful connection
+      isReconnecting = false;
+      if (reconnectInterval) {
+        clearInterval(reconnectInterval);
+        reconnectInterval = null;
+      }
     });
 
     parser.on('data', (data) => {
       const trimmedData = data.trim();
       console.log('Received:', trimmedData);
+      
+      // Check if Arduino has been reset and is ready
+      if (trimmedData.includes('Scanner ready')) {
+        console.log('\u2713 Arduino initialized and ready to scan');
+        return;
+      }
       
       // Try to parse JSON data from Arduino
       try {
@@ -90,14 +132,119 @@ async function initSerialPort() {
       }
     });
 
+    serialPort.on('close', () => {
+      console.log('\n⚠️  Serial port closed (Arduino may have been disconnected or reset)');
+      parser = null;
+      serialPort = null;
+      
+      // Attempt to reconnect
+      if (!isReconnecting) {
+        console.log('Attempting to reconnect...');
+        attemptReconnect();
+      }
+    });
+
     serialPort.on('error', (err) => {
       console.error('Serial port error:', err.message);
+      
+      // Handle specific errors
+      if (err.message.includes('Access denied') || err.message.includes('cannot open')) {
+        console.log('\n⚠️  Port access denied or unavailable. Will retry...');
+        if (!isReconnecting) {
+          attemptReconnect();
+        }
+      }
     });
 
   } catch (error) {
     console.error('Error initializing serial port:', error);
+    if (!isReconnecting) {
+      attemptReconnect();
+    }
   }
 }
+
+// Function to attempt reconnection
+function attemptReconnect() {
+  if (isReconnecting) return;
+  
+  isReconnecting = true;
+  reconnectAttempts++;
+
+  console.log(`Reconnection attempt ${reconnectAttempts} in ${RECONNECT_DELAY/1000} seconds...`);
+  
+  reconnectInterval = setTimeout(async () => {
+    try {
+      // Close existing port if any
+      if (serialPort && serialPort.isOpen) {
+        await serialPort.close();
+      }
+    } catch (err) {
+      // Ignore close errors
+    }
+    
+    serialPort = null;
+    parser = null;
+    
+    await initSerialPort();
+  }, RECONNECT_DELAY);
+}
+
+// ===== GRACEFUL SHUTDOWN =====
+
+let isShuttingDown = false;
+
+async function gracefulShutdown(signal) {
+  if (isShuttingDown) return;
+  isShuttingDown = true;
+  
+  console.log(`\n\n🛑 Received ${signal}. Shutting down gracefully...`);
+  
+  // Clear reconnect interval if any
+  if (reconnectInterval) {
+    clearInterval(reconnectInterval);
+  }
+  
+  // Close all SSE connections
+  console.log('Closing SSE connections...');
+  sseClients.forEach(client => {
+    try {
+      client.res.end();
+    } catch (err) {
+      // Ignore errors when closing
+    }
+  });
+  sseClients = [];
+  
+  // Close serial port
+  if (serialPort && serialPort.isOpen) {
+    try {
+      console.log('Closing serial port...');
+      await serialPort.close();
+      console.log('✓ Serial port closed');
+    } catch (err) {
+      console.error('Error closing serial port:', err.message);
+    }
+  }
+  
+  console.log('✓ Cleanup complete. Exiting...\n');
+  process.exit(0);
+}
+
+// Handle termination signals
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGQUIT', () => gracefulShutdown('SIGQUIT'));
+
+// Handle uncaught errors
+process.on('uncaughtException', (err) => {
+  console.error('\n❌ Uncaught Exception:', err);
+  gracefulShutdown('uncaughtException');
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('\n❌ Unhandled Rejection at:', promise, 'reason:', reason);
+});
 
 // ===== CSV HELPER FUNCTIONS =====
 

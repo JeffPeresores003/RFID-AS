@@ -65,6 +65,8 @@
     let eventSource = null;
     let scanSound = null;
     let isScanning = false;
+    let clearScanStatusTimer = null;
+    let fadeScanStatusTimer = null;
 
     // Create audio for scan feedback (optional)
     try {
@@ -233,6 +235,24 @@
           </div>
         `;
       }
+
+      if (clearScanStatusTimer) {
+        clearTimeout(clearScanStatusTimer);
+      }
+      if (fadeScanStatusTimer) {
+        clearTimeout(fadeScanStatusTimer);
+      }
+
+      fadeScanStatusTimer = setTimeout(() => {
+        const statusCard = container.querySelector('.scan-status');
+        if (statusCard) {
+          statusCard.classList.add('fade-out');
+        }
+      }, 2700);
+
+      clearScanStatusTimer = setTimeout(() => {
+        container.innerHTML = '';
+      }, 3000);
 
       // Refresh today's scans
       loadTodayScans();
