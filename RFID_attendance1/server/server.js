@@ -5,6 +5,13 @@ const path = require('path');
 const { SerialPort } = require('serialport');
 const { ReadlineParser } = require('@serialport/parser-readline');
 
+const { createClient } = require('@supabase/supabase-js');
+
+const SUPABASE_URL = 'https://bzwhewglvcxssnvebliw.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_jI3byTirl75E51Tg7TAzCA_1aHU8zdx';
+
+const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+
 const app = express();
 const PORT = 3000;
 
@@ -120,11 +127,13 @@ async function initSerialPort() {
       
       // Try to parse JSON data from Arduino
       try {
-        const parsedData = JSON.parse(trimmedData);
-        if (parsedData.uid) {
-          handleRFIDScan(parsedData.uid);
-        }
-      } catch (e) {
+    const parsedData = JSON.parse(trimmedData);
+    // Only process scans if at least one SSE client is connected
+    if (sseClients.length > 0) {
+      handleRFIDScan(parsedData.uid);
+    }
+    // Optionally: else ignore or buffer scans
+  } catch (e) {
         // Not JSON, ignore or log for debugging
         if (trimmedData.length > 0 && !trimmedData.startsWith('RFID')) {
           console.log('Non-JSON data:', trimmedData);
@@ -288,77 +297,83 @@ function appendToCSV(filePath, row, headers) {
 
 function handleRFIDScan(uid) {
   console.log(`\n📡 RFID Scanned: ${uid}`);
-  
-  // Find student by UID
-  const students = readCSV(STUDENTS_CSV);
-  const student = students.find(s => s.card_uid.toLowerCase() === uid.toLowerCase());
-  
-  if (!student) {
-    console.log('⚠️  Unknown card - Not registered');
-    const scanData = {
-      status: 'error',
-      message: 'Card not registered',
-      uid: uid,
-      timestamp: new Date().toISOString()
-    };
-    // Broadcast to all SSE clients
-    broadcastSSE(scanData);
+  // Always broadcast UID for capture (for register.html scan button)
+  broadcastSSE({ status: 'capture', uid: uid, timestamp: new Date().toISOString() });
+
+  // Only record attendance if scanning is active (scanner.html)
+  // Check if any SSE client has scanning mode enabled
+  const scanningClients = sseClients.filter(client => client.scanningActive);
+  if (scanningClients.length === 0) {
+    // No active scanner, do not record attendance
     return;
   }
 
-  // Check for duplicate scan today
-  const attendance = readCSV(ATTENDANCE_CSV);
-  const today = new Date().toISOString().split('T')[0]; // Get YYYY-MM-DD format
-  
-  const alreadyScannedToday = attendance.find(record => 
-    record.card_uid && 
-    record.card_uid.toLowerCase() === uid.toLowerCase() && 
-    record.scanned_at && 
-    record.scanned_at.startsWith(today)
-  );
+  (async () => {
+    // Find student by UID using Supabase
+    const { data: students, error: studentError } = await supabase
+      .from('students')
+      .select('*')
+      .eq('card_uid', uid);
+    const student = students && students.length > 0 ? students[0] : null;
 
-  if (alreadyScannedToday) {
-    console.log(`⚠️  Duplicate scan prevented: ${student.fullname} already scanned today at ${alreadyScannedToday.scanned_at}`);
+    if (!student) {
+      console.log('⚠️  Unknown card - Not registered');
+      const scanData = {
+        status: 'error',
+        message: 'Card not registered',
+        uid: uid,
+        timestamp: new Date().toISOString()
+      };
+      broadcastSSE(scanData);
+      return;
+    }
+
+    // Check for duplicate scan today using Supabase
+    const today = new Date().toISOString().split('T')[0];
+    const { data: attendance, error: attendanceError } = await supabase
+      .from('attendance')
+      .select('*')
+      .eq('card_uid', uid)
+      .gte('scanned_at', today);
+
+    const alreadyScannedToday = attendance && attendance.length > 0 ? attendance[0] : null;
+
+    if (alreadyScannedToday) {
+      console.log(`⚠️  Duplicate scan prevented: ${student.fullname} already scanned today at ${alreadyScannedToday.scanned_at}`);
+      const scanData = {
+        status: 'duplicate',
+        message: 'Already scanned today',
+        student: student,
+        previous_scan: alreadyScannedToday.scanned_at,
+        timestamp: new Date().toISOString()
+      };
+      broadcastSSE(scanData);
+      return;
+    }
+
+    // Record attendance in Supabase
+    const timestamp = new Date().toISOString();
+    await supabase
+      .from('attendance')
+      .insert([{
+        student_id: student.student_id,
+        card_uid: uid,
+        fullname: student.fullname,
+        grade: student.grade,
+        section: student.section,
+        scanned_at: timestamp
+      }]);
+
+    console.log(`✓ Attendance recorded for: ${student.fullname}`);
+
     const scanData = {
-      status: 'duplicate',
-      message: 'Already scanned today',
+      status: 'success',
+      message: 'Attendance recorded',
       student: student,
-      previous_scan: alreadyScannedToday.scanned_at,
-      timestamp: new Date().toISOString()
+      timestamp: timestamp
     };
-    // Broadcast to all SSE clients
     broadcastSSE(scanData);
-    return;
-  }
-
-  // Record attendance
-  const attendanceId = Date.now(); // Simple unique ID
-  const timestamp = new Date().toISOString();
-  
-  const attendanceRecord = {
-    id: attendanceId,
-    student_id: student.student_id,
-    card_uid: uid,
-    fullname: student.fullname,
-    grade: student.grade,
-    section: student.section,
-    scanned_at: timestamp
-  };
-
-  const headers = ['id', 'student_id', 'card_uid', 'fullname', 'grade', 'section', 'scanned_at'];
-  appendToCSV(ATTENDANCE_CSV, attendanceRecord, headers);
-
-  console.log(`✓ Attendance recorded for: ${student.fullname}`);
-
-  const scanData = {
-    status: 'success',
-    message: 'Attendance recorded',
-    student: student,
-    timestamp: timestamp
-  };
-
-  // Broadcast to all SSE clients
-  broadcastSSE(scanData);
+  })();
 }
 
 // ===== SERVER-SENT EVENTS (SSE) for Real-time Updates =====
@@ -375,10 +390,26 @@ app.get('/api/scan-events', (req, res) => {
   res.setHeader('Connection', 'keep-alive');
   
   const clientId = Date.now();
-  const newClient = { id: clientId, res };
+  // By default, scanningActive is false. Frontend must send a message to enable scanning.
+  const newClient = { id: clientId, res, scanningActive: false };
   sseClients.push(newClient);
   
   console.log(`Client ${clientId} connected to SSE`);
+
+    // Send clientId to frontend immediately
+    newClient.res.write(`data: ${JSON.stringify({ clientId })}\n\n`);
+
+  // Listen for scanning mode toggle from frontend
+  req.on('data', chunk => {
+    try {
+      const msg = chunk.toString();
+      if (msg.includes('scanning:true')) {
+        newClient.scanningActive = true;
+      } else if (msg.includes('scanning:false')) {
+        newClient.scanningActive = false;
+      }
+    } catch (e) {}
+  });
 
   req.on('close', () => {
     sseClients = sseClients.filter(client => client.id !== clientId);
@@ -386,50 +417,72 @@ app.get('/api/scan-events', (req, res) => {
   });
 });
 
+  // Endpoint to activate scanning mode for a client
+  app.post('/api/scanner/activate', (req, res) => {
+    const { clientId } = req.body;
+    if (!clientId) {
+      return res.status(400).json({ error: 'clientId required' });
+    }
+    const client = sseClients.find(c => c.id === clientId);
+    if (!client) {
+      return res.status(404).json({ error: 'Client not found' });
+    }
+    client.scanningActive = true;
+    res.json({ message: 'Scanning activated' });
+  });
 // ===== API ROUTES =====
 
 // Get all students
 app.get('/api/students', (req, res) => {
   const students = readCSV(STUDENTS_CSV);
-  res.json(students);
+    (async () => {
+      const { data: students, error } = await supabase
+        .from('students')
+        .select('*');
+      if (error) {
+        return res.status(500).json({ error: 'Failed to fetch students' });
+      }
+      res.json(students);
+    })();
 });
 
 // Register new student
 app.post('/api/students', (req, res) => {
   const { student_id, card_uid, fullname, grade, section } = req.body;
-  
+
   // Validation
   if (!student_id || !card_uid || !fullname || !grade || !section) {
     return res.status(400).json({ error: 'All fields are required' });
   }
 
-  const students = readCSV(STUDENTS_CSV);
-  
-  // Check for duplicate student ID or card UID
-  const duplicateId = students.find(s => s.student_id === student_id);
-  const duplicateUid = students.find(s => s.card_uid.toLowerCase() === card_uid.toLowerCase());
-  
-  if (duplicateId) {
-    return res.status(400).json({ error: 'Student ID already exists' });
-  }
-  
-  if (duplicateUid) {
-    return res.status(400).json({ error: 'Card UID already registered' });
-  }
+  (async () => {
+    // Check for duplicate student ID or card UID in Supabase
+    const { data: students, error } = await supabase
+      .from('students')
+      .select('*')
+      .or(`student_id.eq.${student_id},card_uid.eq.${card_uid}`);
 
-  const newStudent = {
-    student_id,
-    card_uid: card_uid.toUpperCase(),
-    fullname,
-    grade,
-    section,
-    registered_at: new Date().toISOString()
-  };
+    if (students && students.find(s => s.student_id === student_id)) {
+      return res.status(409).json({ error: 'Student ID already exists' });
+    }
+    if (students && students.find(s => s.card_uid === card_uid)) {
+      return res.status(409).json({ error: 'Card UID already registered' });
+    }
 
-  const headers = ['student_id', 'card_uid', 'fullname', 'grade', 'section', 'registered_at'];
-  appendToCSV(STUDENTS_CSV, newStudent, headers);
+    // Add new student to Supabase
+    const now = new Date();
+    const isoDate = now.toISOString();
+    const { data: inserted, error: insertError } = await supabase
+      .from('students')
+      .insert([{ student_id, card_uid: card_uid.toUpperCase(), fullname, grade, section, registered_date: isoDate }])
+      .select('*');
 
-  res.json({ message: 'Student registered successfully', student: newStudent });
+    if (insertError) {
+      return res.status(500).json({ error: 'Failed to register student' });
+    }
+    // Respond with the new student, including registered_date
+    res.status(201).json({ message: 'Student registered successfully', student: inserted && inserted.length > 0 ? inserted[0] : null });
+  })();
 });
 
 // Get attendance history

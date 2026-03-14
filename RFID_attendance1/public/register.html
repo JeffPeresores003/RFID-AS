@@ -150,18 +150,18 @@
 
       // Listen to SSE for scans
       eventSource = new EventSource(`${API_URL}/scan-events`);
-      
+
       eventSource.onmessage = (event) => {
         const data = JSON.parse(event.data);
+        console.log('SSE received:', data);
         if (data.uid) {
           cardUidInput.value = data.uid;
-          stopUIDCapture();
           showAlert('success', `Card UID captured: ${data.uid}`);
+          // Do not immediately close eventSource, allow user to scan again or stop manually
         }
       };
 
       eventSource.onerror = () => {
-        stopUIDCapture();
         showAlert('error', 'Connection to scanner lost. Please try again.');
       };
     }
@@ -289,7 +289,7 @@
                     <td class="hide-mobile"><code>${student.card_uid}</code></td>
                     <td><span class="badge badge-primary">Grade ${student.grade}</span></td>
                     <td class="hide-mobile">${student.section}</td>
-                    <td class="hide-mobile">${student.registered_at ? new Date(student.registered_at).toLocaleDateString() : 'N/A'}</td>
+                    <td class="hide-mobile">${student.registered_date ? new Date(student.registered_date).toLocaleDateString() : 'N/A'}</td>
                   </tr>
                 `).join('')}
               </tbody>

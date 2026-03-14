@@ -106,7 +106,21 @@
       eventSource = new EventSource(`${API_URL}/scan-events`);
       
       eventSource.onmessage = (event) => {
-        const data = JSON.parse(event.data);
+        let data;
+        try {
+          data = JSON.parse(event.data);
+        } catch (e) {
+          return;
+        }
+        // If clientId is sent, always activate scanning mode
+        if (data.clientId) {
+          fetch(`${API_URL}/scanner/activate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ clientId: data.clientId })
+          });
+          return;
+        }
         handleScanEvent(data);
       };
 
