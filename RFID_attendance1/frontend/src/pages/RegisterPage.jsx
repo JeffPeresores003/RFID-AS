@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { API_BASE } from "../config";
 
 const initialForm = {
@@ -15,10 +15,44 @@ export default function RegisterPage() {
   const [submitting, setSubmitting] = useState(false);
   const [isCapturing, setIsCapturing] = useState(false);
   const [alert, setAlert] = useState({ type: "", message: "" });
+  const [studentSearch, setStudentSearch] = useState("");
+  const [gradeFilter, setGradeFilter] = useState("");
   const eventSourceRef = useRef(null);
   const fallbackPollRef = useRef(null);
   const captureStartedAtRef = useRef(0);
   const lastAppliedUidRef = useRef("");
+
+  const availableGrades = useMemo(() => {
+    return Array.from(
+      new Set(
+        students
+          .map((student) => String(student?.grade || "").trim())
+          .filter(Boolean),
+      ),
+    ).sort((a, b) => Number(a) - Number(b));
+  }, [students]);
+
+  const filteredStudents = useMemo(() => {
+    const query = studentSearch.trim().toLowerCase();
+
+    return students.filter((student) => {
+      const studentGrade = String(student?.grade || "").trim();
+      const matchesGrade = !gradeFilter || studentGrade === gradeFilter;
+      if (!matchesGrade) return false;
+
+      if (!query) return true;
+
+      const studentId = String(student?.student_id || "").toLowerCase();
+      const fullName = String(student?.fullname || "").toLowerCase();
+      const section = String(student?.section || "").toLowerCase();
+
+      return (
+        studentId.includes(query) ||
+        fullName.includes(query) ||
+        section.includes(query)
+      );
+    });
+  }, [students, studentSearch, gradeFilter]);
 
   useEffect(() => {
     let mounted = true;
@@ -336,7 +370,7 @@ export default function RegisterPage() {
             </div>
           </div>
 
-          <div className="actions-row">
+          <div className="actions-row register-form-actions">
             <button
               type="submit"
               className="btn btn-primary"
@@ -359,11 +393,41 @@ export default function RegisterPage() {
       </div>
 
       <div className="card">
-        <h2 className="card-title">Registered Students</h2>
+        <div className="card-row wrap register-students-toolbar">
+          <div className="register-students-left">
+            <h2 className="card-title card-title-zero">Registered Students</h2>
+            <input
+              className="form-input register-students-search"
+              type="text"
+              value={studentSearch}
+              onChange={(e) => setStudentSearch(e.target.value)}
+              placeholder="Search by ID, Name, or Section"
+            />
+          </div>
+
+          <select
+            className="form-input register-students-grade"
+            value={gradeFilter}
+            onChange={(e) => setGradeFilter(e.target.value)}
+          >
+            <option value="">All Grades</option>
+            {availableGrades.map((grade) => (
+              <option key={grade} value={grade}>
+                Grade {grade}
+              </option>
+            ))}
+          </select>
+        </div>
 
         {students.length === 0 ? (
           <div className="empty-state">
             <div className="empty-state-text">No students registered yet</div>
+          </div>
+        ) : filteredStudents.length === 0 ? (
+          <div className="empty-state">
+            <div className="empty-state-text">
+              No matching students for the current search/filter
+            </div>
           </div>
         ) : (
           <>
@@ -380,7 +444,7 @@ export default function RegisterPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {students.map((student) => (
+                  {filteredStudents.map((student) => (
                     <tr key={`${student.student_id}-${student.card_uid}`}>
                       <td>
                         <strong>{student.student_id}</strong>
@@ -408,7 +472,8 @@ export default function RegisterPage() {
               </table>
             </div>
             <div className="table-summary">
-              Total: {students.length} student{students.length !== 1 ? "s" : ""}
+              Showing {filteredStudents.length} of {students.length} student
+              {students.length !== 1 ? "s" : ""}
             </div>
           </>
         )}
