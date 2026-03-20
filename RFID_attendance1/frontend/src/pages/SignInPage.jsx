@@ -14,6 +14,7 @@ export default function SignInPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [activeSlide, setActiveSlide] = useState(0);
+  const [showForgotModal, setShowForgotModal] = useState(false);
 
   useEffect(() => {
     const session = getTeacherSession();
@@ -31,6 +32,22 @@ export default function SignInPage() {
       window.clearInterval(timer);
     };
   }, []);
+
+  useEffect(() => {
+    function handleEscape(event) {
+      if (event.key === "Escape") {
+        setShowForgotModal(false);
+      }
+    }
+
+    if (showForgotModal) {
+      document.addEventListener("keydown", handleEscape);
+    }
+
+    return () => {
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [showForgotModal]);
 
   const handleSubmit = async (event) => {
     event.preventDefault();
@@ -115,7 +132,7 @@ export default function SignInPage() {
             alt="San Jose Elementary School logo"
             className="signin-logo"
           />
-          <h1 className="signin-title">Teacher Sign In</h1>
+          <h1 className="signin-title">Teacher's Portal</h1>
           <p className="signin-subtitle">
             San Jose Elementary School, San Miguel, Bohol
           </p>
@@ -164,9 +181,62 @@ export default function SignInPage() {
             >
               {submitting ? "Signing in..." : "Sign In"}
             </button>
+            <p className="signin-forgot-wrap">
+              <button
+                type="button"
+                className="signin-forgot-password"
+                onClick={() => setShowForgotModal(true)}
+              >
+                Forgot your password?
+              </button>
+            </p>
+            <p className="signin-admin-wrap">
+              <Link to="/admin/signin" className="signin-admin-link">
+                Sign in as Admin
+              </Link>
+            </p>
           </form>
         </section>
       </div>
+
+      {showForgotModal ? (
+        <div
+          className="confirm-modal-overlay"
+          onClick={() => setShowForgotModal(false)}
+          role="presentation"
+        >
+          <div
+            className="confirm-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="forgot-password-title"
+            aria-describedby="forgot-password-description"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2
+              id="forgot-password-title"
+              className="confirm-modal-title signin-forgot-title"
+            >
+              Do you really forget your password?
+            </h2>
+            <p
+              id="forgot-password-description"
+              className="confirm-modal-text signin-forgot-description"
+            >
+              Please contact your administrator!
+            </p>
+            <div className="confirm-modal-actions">
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => setShowForgotModal(false)}
+              >
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

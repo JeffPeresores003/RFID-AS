@@ -7,12 +7,23 @@ import DashboardPage from "./pages/DashboardPage";
 import RegisterPage from "./pages/RegisterPage";
 import ScannerPage from "./pages/ScannerPage";
 import HistoryPage from "./pages/HistoryPage";
-import { getTeacherSession } from "./auth";
+import TeacherProfilePage from "./pages/TeacherProfilePage";
+import AdminSigninPage from "./pages/AdminSigninPage";
+import AdminDashboardPage from "./pages/AdminDashboardPage";
+import { getAdminSession, getTeacherSession } from "./auth";
 
 function RequireAuth({ children }) {
   const teacher = getTeacherSession();
   if (!teacher) {
     return <Navigate to="/signin" replace />;
+  }
+  return children;
+}
+
+function RequireAdminAuth({ children }) {
+  const adminSession = getAdminSession();
+  if (!adminSession?.token) {
+    return <Navigate to="/admin/signin" replace />;
   }
   return children;
 }
@@ -29,6 +40,24 @@ export default function App() {
           ) : (
             <SignInPage />
           )
+        }
+      />
+      <Route
+        path="/admin/signin"
+        element={
+          getAdminSession()?.token ? (
+            <Navigate to="/admin/dashboard" replace />
+          ) : (
+            <AdminSigninPage />
+          )
+        }
+      />
+      <Route
+        path="/admin/dashboard"
+        element={
+          <RequireAdminAuth>
+            <AdminDashboardPage />
+          </RequireAdminAuth>
         }
       />
       <Route
@@ -75,6 +104,16 @@ export default function App() {
           <RequireAuth>
             <MainLayout>
               <HistoryPage />
+            </MainLayout>
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/profile"
+        element={
+          <RequireAuth>
+            <MainLayout>
+              <TeacherProfilePage />
             </MainLayout>
           </RequireAuth>
         }

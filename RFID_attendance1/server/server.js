@@ -2,6 +2,7 @@ const express = require("express");
 const cors = require("cors");
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 const { SerialPort } = require("serialport");
 const { ReadlineParser } = require("@serialport/parser-readline");
 require("dotenv").config({ path: path.join(__dirname, ".env") });
@@ -27,7 +28,7 @@ if (!SUPABASE_SERVICE_ROLE_KEY) {
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 
 // Middleware
 app.use(cors());
@@ -53,6 +54,9 @@ let lastCapturedAt = 0;
 const recentScanAttemptByUid = new Map();
 const SCAN_DEBOUNCE_MS = 2500;
 let scannerModeEnabled = false;
+
+const ADMIN_SESSION_HOURS = Number(process.env.ADMIN_SESSION_HOURS || 8);
+const adminSessions = new Map();
 
 // ===== SERIAL PORT SETUP =====
 let serialPort = null;
@@ -127,6 +131,54 @@ function includesArduinoHint(value) {
 
 function getNormalizedTeacherId(value) {
   return String(value || "").trim();
+}
+
+function normalizeEmail(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase();
+}
+
+function createAdminSession(admin) {
+  const token = crypto.randomBytes(32).toString("hex");
+  const expiresAt = Date.now() + ADMIN_SESSION_HOURS * 60 * 60 * 1000;
+
+  adminSessions.set(token, {
+    adminId: admin.id,
+    fullname: admin.fullname,
+    email: admin.email,
+    expiresAt,
+  });
+
+  return token;
+}
+
+function getBearerToken(req) {
+  const raw = String(req.headers.authorization || "").trim();
+  if (!raw.toLowerCase().startsWith("bearer ")) return "";
+  return raw.slice(7).trim();
+}
+
+function requireAdminSession(req, res) {
+  const token = getBearerToken(req);
+  if (!token) {
+    res.status(401).json({ error: "Admin authorization is required" });
+    return null;
+  }
+
+  const session = adminSessions.get(token);
+  if (!session) {
+    res.status(401).json({ error: "Invalid admin session" });
+    return null;
+  }
+
+  if (Date.now() > Number(session.expiresAt || 0)) {
+    adminSessions.delete(token);
+    res.status(401).json({ error: "Admin session expired" });
+    return null;
+  }
+
+  return { token, session };
 }
 
 function scorePort(port) {
@@ -762,6 +814,339 @@ app.post("/api/auth/signin", (req, res) => {
     });
   })();
 });
+
+// Admin sign in with email and password
+app.post("/api/admin/auth/signin", (req, res) => {
+  const email = normalizeEmail(req.body?.email);
+  const password = String(req.body?.password || "");
+
+  if (!email || !password) {
+    return res.status(400).json({ error: "Email and password are required" });
+  }
+
+  (async () => {
+    const { data: admin, error } = await supabase
+      .from("admins")
+      .select("id, fullname, email, contact_number, password")
+      .eq("email", email)
+      .maybeSingle();
+
+    if (error) {
+      return res.status(500).json({ error: "Failed to process admin sign in" });
+    }
+
+    if (!admin || String(admin.password || "") !== password) {
+      return res.status(401).json({ error: "Invalid admin email or password" });
+    }
+
+    const nowIso = new Date().toISOString();
+    await supabase
+      .from("admins")
+      .update({ updated_at: nowIso })
+      .eq("id", admin.id);
+
+    const token = createAdminSession(admin);
+
+    return res.json({
+      message: "Admin sign in successful",
+      token,
+      admin: {
+        id: admin.id,
+        fullname: admin.fullname,
+        email: admin.email,
+        contact_number: admin.contact_number,
+      },
+    });
+  })();
+});
+
+app.post("/api/admin/auth/signout", (req, res) => {
+  const token = getBearerToken(req);
+  if (token) {
+    adminSessions.delete(token);
+  }
+  return res.json({ message: "Admin signed out" });
+});
+
+app.get("/api/admin/teachers", (req, res) => {
+  const auth = requireAdminSession(req, res);
+  if (!auth) return;
+
+  (async () => {
+    const { data: teachers, error } = await supabase
+      .from("teachers")
+      .select("id, teachers_id, fullname, email, created_at, updated_at")
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      return res.status(500).json({ error: "Failed to fetch teachers" });
+    }
+
+    return res.json({ teachers: teachers || [] });
+  })();
+});
+
+app.get("/api/admin/teachers/:id", (req, res) => {
+  const auth = requireAdminSession(req, res);
+  if (!auth) return;
+
+  const teacherRowId = String(req.params?.id || "").trim();
+  if (!teacherRowId) {
+    return res.status(400).json({ error: "Teacher id is required" });
+  }
+
+  (async () => {
+    const { data: teacher, error } = await supabase
+      .from("teachers")
+      .select(
+        "id, teachers_id, fullname, email, password, created_at, updated_at",
+      )
+      .eq("id", teacherRowId)
+      .maybeSingle();
+
+    if (error) {
+      return res.status(500).json({ error: "Failed to fetch teacher details" });
+    }
+
+    if (!teacher) {
+      return res.status(404).json({ error: "Teacher not found" });
+    }
+
+    return res.json({ teacher });
+  })();
+});
+
+app.put("/api/admin/teachers/:id", (req, res) => {
+  const auth = requireAdminSession(req, res);
+  if (!auth) return;
+
+  const teacherRowId = String(req.params?.id || "").trim();
+  const teachersId = String(req.body?.teachers_id || "").trim();
+  const fullname = String(req.body?.fullname || "").trim();
+  const email = normalizeEmail(req.body?.email);
+  const password = String(req.body?.password || "");
+
+  if (!teacherRowId) {
+    return res.status(400).json({ error: "Teacher id is required" });
+  }
+
+  if (!teachersId || !fullname || !email || !password) {
+    return res.status(400).json({ error: "All teacher fields are required" });
+  }
+
+  if (password.length < 6) {
+    return res
+      .status(400)
+      .json({ error: "Teacher password must be at least 6 characters" });
+  }
+
+  (async () => {
+    const nowIso = new Date().toISOString();
+
+    const { data: teacher, error } = await supabase
+      .from("teachers")
+      .update({
+        teachers_id: teachersId,
+        fullname,
+        email,
+        password,
+        updated_at: nowIso,
+      })
+      .eq("id", teacherRowId)
+      .select(
+        "id, teachers_id, fullname, email, password, created_at, updated_at",
+      )
+      .maybeSingle();
+
+    if (error) {
+      const isConflict =
+        String(error.code || "") === "23505" ||
+        String(error.message || "")
+          .toLowerCase()
+          .includes("duplicate");
+      if (isConflict) {
+        return res.status(409).json({
+          error: "Teacher ID or email already exists",
+        });
+      }
+      return res
+        .status(500)
+        .json({ error: "Failed to update teacher account" });
+    }
+
+    if (!teacher) {
+      return res.status(404).json({ error: "Teacher not found" });
+    }
+
+    return res.json({
+      message: "Teacher account updated",
+      teacher,
+    });
+  })();
+});
+
+app.post("/api/admin/teachers", (req, res) => {
+  const auth = requireAdminSession(req, res);
+  if (!auth) return;
+
+  const teachersId = String(req.body?.teachers_id || "").trim();
+  const fullname = String(req.body?.fullname || "").trim();
+  const email = normalizeEmail(req.body?.email);
+  const password = String(req.body?.password || "");
+
+  if (!teachersId || !fullname || !email || !password) {
+    return res.status(400).json({ error: "All teacher fields are required" });
+  }
+
+  if (password.length < 6) {
+    return res
+      .status(400)
+      .json({ error: "Teacher password must be at least 6 characters" });
+  }
+
+  (async () => {
+    const nowIso = new Date().toISOString();
+
+    const { data: teacher, error } = await supabase
+      .from("teachers")
+      .insert([
+        {
+          teachers_id: teachersId,
+          fullname,
+          email,
+          password,
+          created_at: nowIso,
+          updated_at: nowIso,
+        },
+      ])
+      .select("id, teachers_id, fullname, email, created_at, updated_at")
+      .maybeSingle();
+
+    if (error) {
+      const isConflict =
+        String(error.code || "") === "23505" ||
+        String(error.message || "")
+          .toLowerCase()
+          .includes("duplicate");
+      if (isConflict) {
+        return res.status(409).json({
+          error: "Teacher ID or email already exists",
+        });
+      }
+      return res
+        .status(500)
+        .json({ error: "Failed to create teacher account" });
+    }
+
+    return res.status(201).json({
+      message: "Teacher account created",
+      teacher,
+    });
+  })();
+});
+
+// Update teacher profile
+app.put("/api/teachers/profile", (req, res) => {
+  const teachersId = getNormalizedTeacherId(req.body?.teachers_id);
+  const fullname = String(req.body?.fullname || "").trim();
+  const email = String(req.body?.email || "")
+    .trim()
+    .toLowerCase();
+
+  if (!teachersId || !fullname || !email) {
+    return res
+      .status(400)
+      .json({ error: "Teacher ID, full name, and email are required" });
+  }
+
+  (async () => {
+    try {
+      const { data: teacher, error } = await supabase
+        .from("teachers")
+        .update({ fullname, email })
+        .eq("teachers_id", teachersId)
+        .select("id, teachers_id, fullname, email")
+        .maybeSingle();
+
+      if (error) {
+        return res.status(500).json({ error: "Failed to update profile" });
+      }
+
+      if (!teacher) {
+        return res.status(404).json({ error: "Teacher not found" });
+      }
+
+      return res.json({
+        message: "Profile updated successfully",
+        teacher: {
+          id: teacher.id,
+          teachers_id: teacher.teachers_id,
+          fullname: teacher.fullname,
+          email: teacher.email,
+        },
+      });
+    } catch (err) {
+      return res.status(500).json({ error: "Failed to update profile" });
+    }
+  })();
+});
+
+// Change teacher password
+app.put("/api/teachers/change-password", (req, res) => {
+  const teachersId = getNormalizedTeacherId(req.body?.teachers_id);
+  const currentPassword = String(req.body?.currentPassword || "");
+  const newPassword = String(req.body?.newPassword || "");
+
+  if (!teachersId || !currentPassword || !newPassword) {
+    return res.status(400).json({ error: "All password fields are required" });
+  }
+
+  if (newPassword.length < 6) {
+    return res
+      .status(400)
+      .json({ error: "New password must be at least 6 characters" });
+  }
+
+  (async () => {
+    try {
+      const { data: teacher, error } = await supabase
+        .from("teachers")
+        .select("id, teachers_id, password")
+        .eq("teachers_id", teachersId)
+        .maybeSingle();
+
+      if (error) {
+        return res
+          .status(500)
+          .json({ error: "Failed to process password change" });
+      }
+
+      if (!teacher) {
+        return res.status(404).json({ error: "Teacher not found" });
+      }
+
+      if (String(teacher.password || "") !== currentPassword) {
+        return res.status(401).json({ error: "Current password is incorrect" });
+      }
+
+      const { error: updateError } = await supabase
+        .from("teachers")
+        .update({ password: newPassword })
+        .eq("teachers_id", teachersId);
+
+      if (updateError) {
+        return res.status(500).json({ error: "Failed to update password" });
+      }
+
+      return res.json({ message: "Password changed successfully" });
+    } catch (err) {
+      return res
+        .status(500)
+        .json({ error: "Failed to process password change" });
+    }
+  })();
+});
+
 // ===== API ROUTES =====
 
 // Get all students
