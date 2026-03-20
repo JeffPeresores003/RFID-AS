@@ -642,8 +642,10 @@ function broadcastSSE(data) {
 
 app.get("/api/scan-events", (req, res) => {
   res.setHeader("Content-Type", "text/event-stream");
-  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Cache-Control", "no-cache, no-transform");
   res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");
+  res.setHeader("Access-Control-Allow-Origin", "*");
   if (typeof res.flushHeaders === "function") {
     res.flushHeaders();
   }
