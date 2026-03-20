@@ -135,6 +135,14 @@ export default function MainLayout({ children }) {
                     <div className="teacher-dropdown-divider"></div>
                     <button
                       type="button"
+                      className="teacher-dropdown-viewprofile"
+                      onClick={() => navigate("/profile")}
+                    >
+                      View Profile
+                    </button>
+                    <div className="teacher-dropdown-divider"></div>
+                    <button
+                      type="button"
                       className="teacher-dropdown-signout"
                       onClick={openSignOutModal}
                     >
