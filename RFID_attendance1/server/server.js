@@ -54,6 +54,7 @@ let lastCapturedAt = 0;
 const recentScanAttemptByUid = new Map();
 const SCAN_DEBOUNCE_MS = 2500;
 let scannerModeEnabled = false;
+const SCANNER_BRIDGE_KEY = String(process.env.SCANNER_BRIDGE_KEY || "").trim();
 
 const ADMIN_SESSION_HOURS = Number(process.env.ADMIN_SESSION_HOURS || 8);
 const adminSessions = new Map();
@@ -1440,6 +1441,16 @@ app.get("/api/attendance/export", (req, res) => {
 
 // Test endpoint to simulate RFID scan (for testing without Arduino)
 app.post("/api/test-scan", (req, res) => {
+  const bridgeKeyFromHeader = String(
+    req.headers["x-scanner-bridge-key"] || "",
+  ).trim();
+  const bridgeKeyFromBody = String(req.body?.bridge_key || "").trim();
+  const providedBridgeKey = bridgeKeyFromHeader || bridgeKeyFromBody;
+
+  if (SCANNER_BRIDGE_KEY && providedBridgeKey !== SCANNER_BRIDGE_KEY) {
+    return res.status(401).json({ error: "Invalid scanner bridge key" });
+  }
+
   const { uid } = req.body;
   if (!uid) {
     return res.status(400).json({ error: "UID required" });

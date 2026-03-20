@@ -5,7 +5,8 @@
   "main": "server.js",
   "scripts": {
     "dev": "node server.js",
-    "start": "node server.js"
+    "start": "node server.js",
+    "bridge": "node local-scanner-bridge.js"
   },
   "keywords": [
     "rfid",
