@@ -509,6 +509,10 @@ body {
   flex-wrap: wrap;
 }
 
+.history-filter-actions {
+  justify-content: flex-end;
+}
+
 .badge {
   display: inline-block;
   padding: 0.25rem 0.75rem;
@@ -564,9 +568,42 @@ body {
   margin-top: 1.5rem;
 }
 
+.register-form-actions {
+  justify-content: flex-end;
+  align-items: center;
+}
+
 .table-summary {
   margin-top: 1rem;
   color: var(--text-light);
+}
+
+.register-students-toolbar {
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: nowrap;
+}
+
+.register-students-left {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  flex-wrap: nowrap;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.register-students-search {
+  min-width: 220px;
+  max-width: 520px;
+  flex: 1 1 auto;
+}
+
+.register-students-grade {
+  width: 170px;
+  flex: 0 0 170px;
+  margin-left: 0;
 }
 
 .scanner-card {
@@ -761,6 +798,29 @@ body {
 @media (max-width: 767px) {
   .actions-row {
     flex-direction: column;
+  }
+
+  .register-form-actions {
+    align-items: flex-end;
+  }
+
+  .register-students-toolbar {
+    flex-wrap: wrap;
+  }
+
+  .register-students-left {
+    width: 100%;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .register-students-search {
+    width: 100%;
+  }
+
+  .register-students-grade {
+    width: 100%;
+    margin-left: 0;
   }
 
   .header-logo {
