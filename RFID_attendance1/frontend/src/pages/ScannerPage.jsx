@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { API_BASE } from "../config";
+import { getTeacherSession } from "../auth";
 
 function formatTimestamp(timestamp) {
   const parsed = new Date(timestamp);
@@ -59,21 +60,27 @@ function getScannerApiBase() {
   return API_BASE;
 }
 
-async function setScannerMode(enabled) {
+async function setScannerMode(enabled, teachersId = "") {
   const apiBase = getScannerApiBase();
   const endpoint = enabled
     ? `${apiBase}/scanner/start`
     : `${apiBase}/scanner/stop`;
+
   const response = await fetch(endpoint, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(enabled ? { teachers_id: teachersId } : {}),
   });
+
   if (!response.ok) {
     throw new Error("Failed to update scanner mode");
   }
 }
 
 export default function ScannerPage() {
+  const teacher = getTeacherSession();
+  const teacherId = String(teacher?.teachers_id || "").trim();
+
   const [isScanning, setIsScanning] = useState(false);
   const [connectionState, setConnectionState] = useState("idle");
   const [lastScan, setLastScan] = useState(null);
@@ -152,13 +159,16 @@ export default function ScannerPage() {
   const refreshTodayAndFindUid = async (uid) => {
     const normalizedUid = normalizeUid(uid);
     if (!normalizedUid) return null;
+    if (!teacherId) return null;
 
     try {
       const apiBase = getScannerApiBase();
       const today = getLocalDateIso();
-      const response = await fetch(
-        `${apiBase}/attendance/filter?date=${today}`,
-      );
+      const params = new URLSearchParams({
+        date: today,
+        teachers_id: teacherId,
+      }).toString();
+      const response = await fetch(`${apiBase}/attendance/filter?${params}`);
       if (!response.ok) return null;
 
       const scans = await response.json();
@@ -172,8 +182,11 @@ export default function ScannerPage() {
       }
 
       // Fallback: ask backend directly for today's latest scan by UID.
+      const uidParams = new URLSearchParams({
+        teachers_id: teacherId,
+      }).toString();
       const uidResponse = await fetch(
-        `${apiBase}/attendance/today-by-uid/${encodeURIComponent(normalizedUid)}`,
+        `${apiBase}/attendance/today-by-uid/${encodeURIComponent(normalizedUid)}?${uidParams}`,
       );
 
       if (uidResponse.ok) {
@@ -194,7 +207,7 @@ export default function ScannerPage() {
       }
 
       // Final fallback when /today-by-uid is unavailable (older backend build).
-      const historyResponse = await fetch(`${apiBase}/attendance`);
+      const historyResponse = await fetch(`${apiBase}/attendance?${uidParams}`);
       if (!historyResponse.ok) {
         return null;
       }
@@ -392,12 +405,20 @@ export default function ScannerPage() {
   };
 
   const loadTodayScans = useCallback(async () => {
+    if (!teacherId) {
+      setPageError("No teacher session found. Please sign in again.");
+      setTodayScans([]);
+      return;
+    }
+
     try {
       const apiBase = getScannerApiBase();
       const today = getLocalDateIso();
-      const response = await fetch(
-        `${apiBase}/attendance/filter?date=${today}`,
-      );
+      const params = new URLSearchParams({
+        date: today,
+        teachers_id: teacherId,
+      }).toString();
+      const response = await fetch(`${apiBase}/attendance/filter?${params}`);
       if (!response.ok) {
         throw new Error("Failed to load scans");
       }
@@ -447,7 +468,7 @@ export default function ScannerPage() {
       );
       setTodayScans([]);
     }
-  }, []);
+  }, [teacherId]);
 
   useEffect(() => {
     loadTodayScans();
@@ -461,6 +482,8 @@ export default function ScannerPage() {
       if (wasScanning) {
         fetch(`${getScannerApiBase()}/scanner/stop`, {
           method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({}),
           keepalive: true,
         }).catch(() => {});
       }
@@ -493,6 +516,11 @@ export default function ScannerPage() {
   const startScanning = async () => {
     if (scanningStateRef.current) return;
 
+    if (!teacherId) {
+      setPageError("No teacher session found. Please sign in again.");
+      return;
+    }
+
     scanningStateRef.current = true;
     scanSessionStartedAtRef.current = Date.now();
     lastProcessedCaptureRef.current = null;
@@ -509,7 +537,7 @@ export default function ScannerPage() {
     }
 
     try {
-      await setScannerMode(true);
+      await setScannerMode(true, teacherId);
     } catch {
       setIsScanning(false);
       setConnectionState("disconnected");
@@ -557,7 +585,7 @@ export default function ScannerPage() {
       if (!scanningStateRef.current) return;
 
       try {
-        await setScannerMode(false);
+        await setScannerMode(false, teacherId);
       } catch {
         // Ignore stop errors; connection is already down.
       }
@@ -586,7 +614,7 @@ export default function ScannerPage() {
     setPageError("");
 
     try {
-      await setScannerMode(false);
+      await setScannerMode(false, teacherId);
     } catch {
       // Keep UI responsive even if backend stop call fails.
     }

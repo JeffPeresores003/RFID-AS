@@ -1,5 +1,3 @@
--- Table order and constraints may not be valid for execution.
-
 CREATE TABLE public.attendance (
   id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
   student_id character varying NOT NULL,
@@ -21,4 +19,14 @@ CREATE TABLE public.students (
   section character varying NOT NULL,
   registered_date timestamp without time zone,
   CONSTRAINT students_pkey PRIMARY KEY (id)
+);
+CREATE TABLE public.teachers (
+  id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
+  teachers_id character varying NOT NULL UNIQUE,
+  fullname character varying NOT NULL,
+  email character varying NOT NULL UNIQUE,
+  password character varying NOT NULL,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT teachers_pkey PRIMARY KEY (id)
 );

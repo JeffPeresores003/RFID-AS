@@ -20,6 +20,7 @@ function formatTimestamp(timestamp) {
 
 export default function DashboardPage() {
   const teacher = getTeacherSession();
+  const teacherId = String(teacher?.teachers_id || "").trim();
 
   const [stats, setStats] = useState({
     totalStudents: 0,
@@ -30,11 +31,19 @@ export default function DashboardPage() {
   const [loadError, setLoadError] = useState("");
 
   useEffect(() => {
+    if (!teacherId) {
+      setStats({ totalStudents: 0, todayScans: 0, totalScans: 0 });
+      setAttendance([]);
+      setLoadError("No teacher session found. Please sign in again.");
+      return;
+    }
+
     let mounted = true;
+    const query = new URLSearchParams({ teachers_id: teacherId }).toString();
 
     const loadStats = async () => {
       try {
-        const response = await fetch(`${API_BASE}/stats`);
+        const response = await fetch(`${API_BASE}/stats?${query}`);
         if (!response.ok) throw new Error("Failed to load stats");
         const payload = await response.json();
         if (mounted) {
@@ -51,7 +60,7 @@ export default function DashboardPage() {
 
     const loadRecentScans = async () => {
       try {
-        const response = await fetch(`${API_BASE}/attendance`);
+        const response = await fetch(`${API_BASE}/attendance?${query}`);
         if (!response.ok) throw new Error("Failed to load attendance");
         const payload = await response.json();
         if (mounted) {
@@ -78,7 +87,7 @@ export default function DashboardPage() {
       mounted = false;
       clearInterval(timer);
     };
-  }, []);
+  }, [teacherId]);
 
   const recentScans = useMemo(() => attendance.slice(0, 5), [attendance]);
 
@@ -144,7 +153,10 @@ export default function DashboardPage() {
           <button
             type="button"
             onClick={() => {
-              window.location.href = `${API_BASE}/attendance/export`;
+              const exportQuery = new URLSearchParams({
+                teachers_id: teacherId,
+              }).toString();
+              window.location.href = `${API_BASE}/attendance/export?${exportQuery}`;
             }}
             className="btn btn-outline"
           >
