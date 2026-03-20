@@ -672,6 +672,51 @@ app.post("/api/scanner/stop", (req, res) => {
   console.log("⏹️ Scanner mode disabled");
   res.json({ enabled: false });
 });
+
+// Teacher sign in
+app.post("/api/auth/signin", (req, res) => {
+  const email = String(req.body?.email || "")
+    .trim()
+    .toLowerCase();
+  const password = String(req.body?.password || "");
+
+  if (!email || !password) {
+    return res.status(400).json({ error: "Email and password are required" });
+  }
+
+  (async () => {
+    const { data: teachers, error } = await supabase
+      .from("teachers")
+      .select("id, teachers_id, fullname, email, password")
+      .eq("email", email)
+      .limit(1);
+
+    if (error) {
+      return res.status(500).json({ error: "Failed to process sign in" });
+    }
+
+    const teacher =
+      Array.isArray(teachers) && teachers.length > 0 ? teachers[0] : null;
+
+    if (!teacher) {
+      return res.status(401).json({ error: "Invalid email or password" });
+    }
+
+    if (String(teacher.password || "") !== password) {
+      return res.status(401).json({ error: "Invalid email or password" });
+    }
+
+    return res.json({
+      message: "Sign in successful",
+      teacher: {
+        id: teacher.id,
+        teachers_id: teacher.teachers_id,
+        fullname: teacher.fullname,
+        email: teacher.email,
+      },
+    });
+  })();
+});
 // ===== API ROUTES =====
 
 // Get all students
