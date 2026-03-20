@@ -12,7 +12,7 @@
 6. Click **Upload** ⬆️
 7. **Keep Arduino connected!**
 
-### 2️⃣ Install Server Dependencies (1 minute)
+### 2️⃣ Install Backend Dependencies (1 minute)
 
 Open PowerShell in the project folder:
 
@@ -21,7 +21,16 @@ cd server
 npm install
 ```
 
-### 3️⃣ Start the Server (10 seconds)
+### 3️⃣ Install Frontend Dependencies (React)
+
+Open another terminal:
+
+```powershell
+cd frontend
+npm install
+```
+
+### 4️⃣ Start the Backend Server
 
 ```powershell
 npm start
@@ -29,9 +38,19 @@ npm start
 
 Wait for: ✅ **"Server running at http://localhost:3000"**
 
-### 4️⃣ Open Website
+### 5️⃣ Start the Frontend
 
-Open browser → Go to: **http://localhost:3000**
+In the frontend terminal:
+
+```powershell
+npm run dev
+```
+
+Wait for: ✅ **"http://localhost:5173"**
+
+### 6️⃣ Open Website
+
+Open browser → Go to: **http://localhost:5173**
 
 ---
 
@@ -56,26 +75,29 @@ Open browser → Go to: **http://localhost:3000**
 ```
 📂 Your Project Folder
   ├─ 📄 RFID_attendance1.ino    ← Upload this to Arduino
+  ├─ 📂 frontend/
+  │   ├─ 📄 package.json        ← Run "npm run dev" here
+  │   └─ 📂 src/                ← React frontend source
   ├─ 📂 server/
   │   ├─ 📄 server.js           ← Run "npm start" here
   │   └─ 📂 data/
   │       ├─ 📄 students.csv    ← Your students database
   │       └─ 📄 attendance.csv  ← Your attendance records
-  └─ 📂 public/
-      └─ 📄 index.html, etc.    ← Your website files
 ```
+
+Old static files in `public/` were removed after migration to React.
 
 ---
 
 ## ❌ Common Issues
 
-| Problem | Solution |
-|---------|----------|
-| "Port busy" | Close Arduino IDE Serial Monitor |
-| "No serial ports found" | Reconnect Arduino USB cable |
-| "npm not found" | Install Node.js from nodejs.org |
-| "Cannot find module" | Run `npm install` in server folder |
-| Website not loading | Make sure server is running |
+| Problem                 | Solution                           |
+| ----------------------- | ---------------------------------- |
+| "Port busy"             | Close Arduino IDE Serial Monitor   |
+| "No serial ports found" | Reconnect Arduino USB cable        |
+| "npm not found"         | Install Node.js from nodejs.org    |
+| "Cannot find module"    | Run `npm install` in server folder |
+| Website not loading     | Make sure server is running        |
 
 ---
 
@@ -93,9 +115,10 @@ Open browser → Go to: **http://localhost:3000**
 1. Start computer
 2. Connect Arduino
 3. Open PowerShell → `cd server` → `npm start`
-4. Open browser → `http://localhost:3000`
-5. Click "Scanner"
-6. Ready to scan! 📡
+4. Open another PowerShell → `cd frontend` → `npm run dev`
+5. Open browser → `http://localhost:5173`
+6. Click "Scanner"
+7. Ready to scan! 📡
 
 ---
 
