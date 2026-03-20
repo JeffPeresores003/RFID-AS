@@ -259,7 +259,8 @@ export default function ScannerPage() {
           ? new Date(matchedScan.scanned_at).getTime()
           : 0;
         const isFreshMatch =
-          matchedTs > 0 && Math.abs(matchedTs - captureTs) <= freshCaptureWindowMs;
+          matchedTs > 0 &&
+          Math.abs(matchedTs - captureTs) <= freshCaptureWindowMs;
 
         if (!isFreshMatch) {
           const now = Date.now();
