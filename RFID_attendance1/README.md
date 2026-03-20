@@ -109,6 +109,67 @@ A complete RFID-based attendance system using Arduino Uno, RC522 RFID reader, an
 2. Go to: **http://localhost:5173**
 3. You should see the Dashboard
 
+## ☁️ Hybrid Deployment (Vercel + Render + Local Scanner Bridge)
+
+When frontend is hosted on Vercel and API is hosted on Render, USB-connected Arduino scanners on laptops cannot be read by Render directly. Use a local bridge on the laptop that has Arduino connected.
+
+### Why scanning fails on another laptop
+
+- Render runs in the cloud and cannot access local USB serial ports.
+- RFID serial reads only happen where the Arduino is physically connected.
+- Without a local bridge, cloud API never receives UID scan events.
+
+### Architecture
+
+- **Frontend**: Vercel (`https://your-app.vercel.app`)
+- **Cloud API**: Render (`https://your-api.onrender.com`)
+- **Scanner Bridge**: Runs locally on scanner laptop; reads COM port and forwards UID to Render `/api/test-scan`.
+
+### 1. Configure Render API
+
+In Render environment variables (Web Service), set:
+
+- `SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY`
+- `ADMIN_SESSION_HOURS=8`
+- Optional but recommended: `SCANNER_BRIDGE_KEY=<strong-random-secret>`
+
+If `SCANNER_BRIDGE_KEY` is set, only bridge clients with matching key can call `/api/test-scan`.
+
+### 2. Configure Vercel Frontend
+
+In Vercel environment variables, set:
+
+- `VITE_API_BASE=https://your-api.onrender.com/api`
+
+Redeploy after setting the variable.
+
+### 3. Run Local Scanner Bridge on the Arduino Laptop
+
+On the laptop physically connected to Arduino:
+
+1. Open terminal in `RFID_attendance1/server`
+2. Install deps (once): `npm install`
+3. Configure `server/.env` (or copy values from `.env.example`):
+   - `BRIDGE_API_BASE=https://your-api.onrender.com/api`
+   - `BRIDGE_ARDUINO_PORT=COM5` (optional, auto-detect if empty)
+   - `BRIDGE_BAUD_RATE=9600`
+   - `SCANNER_BRIDGE_KEY=<same-secret-as-render>` (if used)
+4. Start bridge:
+
+```powershell
+npm run bridge
+```
+
+Bridge file: `server/local-scanner-bridge.js`
+
+### 4. Scan Flow in Production
+
+1. Teacher signs in on Vercel frontend.
+2. Open Scanner page and start scanner mode.
+3. Local bridge forwards card UIDs to Render API.
+4. Render records attendance and broadcasts updates to frontend.
+
 ## 📖 How to Use
 
 ### 1. Register Students
