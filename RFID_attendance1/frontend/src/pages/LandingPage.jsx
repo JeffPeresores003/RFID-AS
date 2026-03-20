@@ -50,7 +50,7 @@ export default function LandingPage() {
         </p>
 
         <div className="landing-actions">
-          <Link to="/dashboard" className="btn btn-primary btn-landing">
+          <Link to="/signin" className="btn btn-primary btn-landing">
             Get Started
           </Link>
         </div>

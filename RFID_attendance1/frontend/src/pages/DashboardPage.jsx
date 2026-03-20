@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { API_BASE } from "../config";
+import { getTeacherSession } from "../auth";
 
 function formatTimestamp(timestamp) {
   const date = new Date(timestamp);
@@ -18,6 +19,8 @@ function formatTimestamp(timestamp) {
 }
 
 export default function DashboardPage() {
+  const teacher = getTeacherSession();
+
   const [stats, setStats] = useState({
     totalStudents: 0,
     todayScans: 0,
@@ -79,10 +82,37 @@ export default function DashboardPage() {
 
   const recentScans = useMemo(() => attendance.slice(0, 5), [attendance]);
 
+  const now = new Date();
+  const hour = now.getHours();
+  const greeting =
+    hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
+  const currentDateLabel = now.toLocaleDateString("en-US", {
+    weekday: "long",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
+
   return (
     <>
-      <h1 className="page-title">Dashboard</h1>
-      <p className="page-subtitle">Welcome to the RFID Attendance System</p>
+      <div className="card dashboard-welcome-card">
+        <div className="dashboard-welcome-row">
+          <div>
+            <div className="dashboard-welcome-greeting">
+              {greeting}, {teacher?.fullname || "Teacher"}
+            </div>
+            <p className="dashboard-welcome-intro">
+              Welcome to the RFID Attendance System
+            </p>
+          </div>
+          <div className="dashboard-welcome-meta">
+            <div className="dashboard-welcome-id">
+              TEACHER ID: {teacher?.teachers_id || "N/A"}
+            </div>
+            <div className="dashboard-welcome-date">{currentDateLabel}</div>
+          </div>
+        </div>
+      </div>
 
       <div className="stats-grid">
         <div className="stat-card">
