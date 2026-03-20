@@ -22,16 +22,16 @@ A complete RFID-based attendance system using Arduino Uno, RC522 RFID reader, an
 
 ## 🔌 RC522 Wiring to Arduino Uno
 
-| RC522 Pin | Arduino Pin |
-|-----------|-------------|
-| SDA       | 10          |
-| SCK       | 13          |
-| MOSI      | 11          |
-| MISO      | 12          |
+| RC522 Pin | Arduino Pin   |
+| --------- | ------------- |
+| SDA       | 10            |
+| SCK       | 13            |
+| MOSI      | 11            |
+| MISO      | 12            |
 | IRQ       | Not connected |
-| GND       | GND         |
-| RST       | 9           |
-| 3.3V      | 3.3V        |
+| GND       | GND           |
+| RST       | 9             |
+| 3.3V      | 3.3V          |
 
 **Buzzer**: Connect buzzer positive to pin 8, negative to GND
 
@@ -55,7 +55,7 @@ A complete RFID-based attendance system using Arduino Uno, RC522 RFID reader, an
 6. Click **Upload** button
 7. Once uploaded, **keep the Arduino connected** to the computer
 
-### Step 2: Install Node.js Dependencies
+### Step 2: Install Backend Dependencies
 
 1. Open PowerShell or Command Prompt
 2. Navigate to the server folder:
@@ -67,7 +67,19 @@ A complete RFID-based attendance system using Arduino Uno, RC522 RFID reader, an
    npm install
    ```
 
-### Step 3: Start the Server
+### Step 3: Install Frontend Dependencies (React)
+
+1. Open another terminal
+2. Navigate to the frontend folder:
+   ```powershell
+   cd "c:\Users\JEFFREY PERESORES\Documents\RFID - test\RFID_attendance1\frontend"
+   ```
+3. Install dependencies:
+   ```powershell
+   npm install
+   ```
+
+### Step 4: Start the Backend Server
 
 1. In the same terminal, run:
    ```powershell
@@ -80,10 +92,21 @@ A complete RFID-based attendance system using Arduino Uno, RC522 RFID reader, an
    Ready to accept RFID scans!
    ```
 
-### Step 4: Open the Web Interface
+### Step 5: Start the Frontend (React)
+
+1. In the frontend terminal, run:
+   ```powershell
+   npm run dev
+   ```
+2. You should see Vite start on:
+   ```
+   http://localhost:5173
+   ```
+
+### Step 6: Open the Web Interface
 
 1. Open your web browser
-2. Go to: **http://localhost:3000**
+2. Go to: **http://localhost:5173**
 3. You should see the Dashboard
 
 ## 📖 How to Use
@@ -131,21 +154,19 @@ A complete RFID-based attendance system using Arduino Uno, RC522 RFID reader, an
 ```
 RFID_attendance1/
 ├── RFID_attendance1.ino          # Arduino code
+├── frontend/
+│   ├── src/                       # React source files
+│   ├── package.json               # React dependencies and scripts
+│   └── vite.config.js             # Dev server and API proxy config
 ├── server/
 │   ├── server.js                 # Node.js backend server
 │   ├── package.json              # Node.js dependencies
 │   └── data/
 │       ├── students.csv          # Student database (CSV)
 │       └── attendance.csv        # Attendance records (CSV)
-└── public/
-    ├── index.html                # Dashboard page
-    ├── register.html             # Student registration
-    ├── scanner.html              # Real-time scanner
-    ├── history.html              # Attendance history
-    └── css/
-        └── styles.css            # Stylesheet
-
 ```
+
+Note: The old `public/` static frontend was removed after migration to React.
 
 ## 🔧 Troubleshooting
 
@@ -171,7 +192,8 @@ RFID_attendance1/
 
 ### Website Not Loading
 
-- Make sure server is running (should show "Server running at http://localhost:3000")
+- Make sure backend server is running (http://localhost:3000)
+- Make sure frontend dev server is running (http://localhost:5173)
 - Try clearing browser cache
 - Check browser console (F12) for errors
 - Make sure no other application is using port 3000
@@ -205,6 +227,7 @@ Simply copy the `server/data/` folder to backup your data.
 ## 🆘 Need Help?
 
 Check the terminal/console for error messages. Most issues are related to:
+
 - Arduino not connected
 - Wrong COM port
 - Missing libraries
@@ -229,4 +252,4 @@ Check the terminal/console for error messages. Most issues are related to:
 
 ---
 
-**Built with:** Arduino, Node.js, Express, SerialPort, HTML/CSS/JavaScript
+**Built with:** Arduino, Node.js, Express, SerialPort, React, Vite
