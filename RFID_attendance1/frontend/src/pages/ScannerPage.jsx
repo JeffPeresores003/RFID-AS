@@ -243,8 +243,65 @@ export default function ScannerPage() {
   };
 
   const handleCapturedUid = async (uid, timestamp = "") => {
-    // This function is no longer used. Duplicate detection is now
-    // handled only by the backend's explicit success/duplicate events.
+    const normalizedUid = normalizeUid(uid);
+    if (!normalizedUid) return;
+
+    const captureTs = timestamp ? new Date(timestamp).getTime() : Date.now();
+    const maxAttempts = 4;
+    const retryDelayMs = 250;
+    const freshCaptureWindowMs = 10000;
+
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      const matchedScan = await refreshTodayAndFindUid(normalizedUid);
+
+      if (matchedScan) {
+        const matchedTs = matchedScan.scanned_at
+          ? new Date(matchedScan.scanned_at).getTime()
+          : 0;
+        const isFreshMatch =
+          matchedTs > 0 && Math.abs(matchedTs - captureTs) <= freshCaptureWindowMs;
+
+        if (!isFreshMatch) {
+          const now = Date.now();
+          const lastShown = lastShownDuplicateRef.current;
+          if (lastShown.uid === normalizedUid && now - lastShown.at < 2000) {
+            return;
+          }
+
+          lastShownDuplicateRef.current = { uid: normalizedUid, at: now };
+          showDuplicateNotice(matchedScan);
+          return;
+        }
+
+        const resolvedScanKey = toScanKey(matchedScan);
+        if (resolvedScanKey) {
+          if (resolvedScanKey === lastNotifiedScanKeyRef.current) {
+            return;
+          }
+          lastNotifiedScanKeyRef.current = resolvedScanKey;
+        }
+
+        presentScanResult({
+          status: "success",
+          message: "Attendance recorded",
+          student: {
+            student_id: matchedScan.student_id,
+            fullname: matchedScan.fullname,
+            grade: matchedScan.grade,
+            section: matchedScan.section,
+            card_uid: matchedScan.card_uid,
+          },
+          timestamp: matchedScan.scanned_at || new Date().toISOString(),
+        });
+        return;
+      }
+
+      if (attempt < maxAttempts - 1) {
+        await new Promise((resolve) => {
+          setTimeout(resolve, retryDelayMs);
+        });
+      }
+    }
   };
 
   const startCapturePolling = () => {
@@ -308,9 +365,8 @@ export default function ScannerPage() {
           return;
         }
 
-        // Polling is just a fallback for missed SSE messages.
-        // The backend's success/duplicate event determines the outcome.
-        // Don't do duplicate checking here.
+        // For new captures, polling resolves the newest scan and presents success quickly.
+        await handleCapturedUid(normalizedUid, payload.timestamp || "");
       } catch {
         // Keep polling in background while scanning is active.
       }
@@ -438,6 +494,8 @@ export default function ScannerPage() {
 
     scanningStateRef.current = true;
     scanSessionStartedAtRef.current = Date.now();
+    lastProcessedCaptureRef.current = null;
+    lastShownDuplicateRef.current = { uid: "", at: 0 };
     setIsActivated(false);
     setIsScanning(true);
     setConnectionState("connecting");
@@ -518,6 +576,7 @@ export default function ScannerPage() {
     scanningStateRef.current = false;
     scanSessionStartedAtRef.current = 0;
     lastShownDuplicateRef.current = { uid: "", at: 0 };
+    lastProcessedCaptureRef.current = null;
     setIsScanning(false);
     setIsActivated(false);
     setConnectionState("idle");
