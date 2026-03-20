@@ -514,13 +514,12 @@ function handleRFIDScan(uid) {
       return;
     }
 
-    // Find student by UID using Supabase
+    // Find candidates by teacher, then match using normalized UID format.
     const { data: students, error: studentError } = await supabase
       .from("students")
       .select("*")
       .eq("teachers_id", activeTeacherId)
-      .eq("card_uid", normalizedUid)
-      .limit(1);
+      .limit(1000);
 
     if (studentError) {
       console.log(`⚠️  Student lookup failed: ${studentError.message}`);
@@ -533,7 +532,12 @@ function handleRFIDScan(uid) {
       return;
     }
 
-    const student = students && students.length > 0 ? students[0] : null;
+    const student =
+      students && students.length > 0
+        ? students.find(
+            (candidate) => normalizeUid(candidate?.card_uid) === normalizedUid,
+          ) || null
+        : null;
 
     if (!student) {
       console.log("⚠️  Unknown card - Not registered");
@@ -1176,11 +1180,12 @@ app.get("/api/students", (req, res) => {
 app.post("/api/students", (req, res) => {
   const { student_id, card_uid, fullname, grade, section } = req.body;
   const teachersId = getNormalizedTeacherId(req.body?.teachers_id);
+  const normalizedCardUid = normalizeUid(card_uid);
 
   // Validation
   if (
     !student_id ||
-    !card_uid ||
+    !normalizedCardUid ||
     !fullname ||
     !grade ||
     !section ||
@@ -1195,7 +1200,7 @@ app.post("/api/students", (req, res) => {
       .from("students")
       .select("*")
       .eq("teachers_id", teachersId)
-      .or(`student_id.eq.${student_id},card_uid.eq.${card_uid}`);
+      .or(`student_id.eq.${student_id}`);
 
     if (error) {
       return res
@@ -1206,7 +1211,10 @@ app.post("/api/students", (req, res) => {
     if (students && students.find((s) => s.student_id === student_id)) {
       return res.status(409).json({ error: "Student ID already exists" });
     }
-    if (students && students.find((s) => s.card_uid === card_uid)) {
+    if (
+      students &&
+      students.find((s) => normalizeUid(s.card_uid) === normalizedCardUid)
+    ) {
       return res.status(409).json({ error: "Card UID already registered" });
     }
 
@@ -1218,7 +1226,7 @@ app.post("/api/students", (req, res) => {
       .insert([
         {
           student_id,
-          card_uid: card_uid.toUpperCase(),
+          card_uid: normalizedCardUid,
           fullname,
           grade,
           section,
