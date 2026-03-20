@@ -1,7 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { API_BASE } from "../config";
+import { getTeacherSession } from "../auth";
 
 export default function HistoryPage() {
+  const teacher = getTeacherSession();
+  const teacherId = String(teacher?.teachers_id || "").trim();
+
   const [records, setRecords] = useState([]);
   const [error, setError] = useState("");
   const [filters, setFilters] = useState(() => ({
@@ -20,12 +24,21 @@ export default function HistoryPage() {
   }, [filters]);
 
   const loadHistory = async (nextFilters = activeFilters) => {
+    if (!teacherId) {
+      setError("No teacher session found. Please sign in again.");
+      setRecords([]);
+      return;
+    }
+
     try {
-      const params = new URLSearchParams(nextFilters);
+      const params = new URLSearchParams({
+        ...nextFilters,
+        teachers_id: teacherId,
+      });
       const url =
         Object.keys(nextFilters).length > 0
           ? `${API_BASE}/attendance/filter?${params.toString()}`
-          : `${API_BASE}/attendance`;
+          : `${API_BASE}/attendance?${params.toString()}`;
 
       const response = await fetch(url);
       if (!response.ok) throw new Error("Failed to load history");
@@ -48,7 +61,7 @@ export default function HistoryPage() {
 
     return () => clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [teacherId]);
 
   const groupedByDate = useMemo(() => {
     const grouped = {};
@@ -173,7 +186,15 @@ export default function HistoryPage() {
             type="button"
             className="btn btn-secondary"
             onClick={() => {
-              const params = new URLSearchParams(activeFilters);
+              if (!teacherId) {
+                setError("No teacher session found. Please sign in again.");
+                return;
+              }
+
+              const params = new URLSearchParams({
+                ...activeFilters,
+                teachers_id: teacherId,
+              });
               const url = `${API_BASE}/attendance/export${
                 params.toString() ? `?${params.toString()}` : ""
               }`;

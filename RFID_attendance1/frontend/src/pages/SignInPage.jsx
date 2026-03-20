@@ -36,11 +36,11 @@ export default function SignInPage() {
     event.preventDefault();
     setError("");
 
-    const email = form.email.trim().toLowerCase();
+    const identifier = form.email.trim();
     const password = form.password;
 
-    if (!email || !password) {
-      setError("Email and password are required.");
+    if (!identifier || !password) {
+      setError("Email or Teacher ID and password are required.");
       return;
     }
 
@@ -50,7 +50,7 @@ export default function SignInPage() {
       const response = await fetch(`${API_BASE}/auth/signin`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ identifier, password }),
       });
 
       const payload = await response.json();
@@ -125,18 +125,18 @@ export default function SignInPage() {
           <form onSubmit={handleSubmit} className="signin-form">
             <div className="form-group no-margin">
               <label htmlFor="signinEmail" className="form-label">
-                Email
+                Email or Teacher ID
               </label>
               <input
                 id="signinEmail"
-                type="email"
+                type="text"
                 className="form-input"
                 value={form.email}
                 onChange={(e) =>
                   setForm((prev) => ({ ...prev, email: e.target.value }))
                 }
-                placeholder="teacher@school.edu"
-                autoComplete="email"
+                placeholder="teacher@school.edu or TCH-0002"
+                autoComplete="username"
               />
             </div>
 

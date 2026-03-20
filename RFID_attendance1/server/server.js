@@ -62,6 +62,7 @@ let isReconnecting = false;
 let reconnectAttempts = 0;
 let preferredPortPath = process.env.ARDUINO_PORT || null;
 const RECONNECT_DELAY = 1500; // 1.5 seconds
+let scannerModeTeacherId = "";
 
 const ARDUINO_HINTS = [
   "arduino",
@@ -122,6 +123,10 @@ function includesArduinoHint(value) {
     typeof value === "string" &&
     ARDUINO_HINTS.some((hint) => value.toLowerCase().includes(hint))
   );
+}
+
+function getNormalizedTeacherId(value) {
+  return String(value || "").trim();
 }
 
 function scorePort(port) {
@@ -445,11 +450,24 @@ function handleRFIDScan(uid) {
   recentScanAttemptByUid.set(normalizedUid, nowMs);
 
   (async () => {
+    const activeTeacherId = getNormalizedTeacherId(scannerModeTeacherId);
+    if (!activeTeacherId) {
+      broadcastSSE({
+        status: "error",
+        message: "No active teacher context for scanner.",
+        uid: normalizedUid,
+        timestamp: new Date().toISOString(),
+      });
+      return;
+    }
+
     // Find student by UID using Supabase
     const { data: students, error: studentError } = await supabase
       .from("students")
       .select("*")
-      .eq("card_uid", normalizedUid);
+      .eq("teachers_id", activeTeacherId)
+      .eq("card_uid", normalizedUid)
+      .limit(1);
 
     if (studentError) {
       console.log(`⚠️  Student lookup failed: ${studentError.message}`);
@@ -485,6 +503,7 @@ function handleRFIDScan(uid) {
     const { data: attendance, error: attendanceError } = await supabase
       .from("attendance")
       .select("*")
+      .eq("teachers_id", activeTeacherId)
       .eq("card_uid", normalizedUid)
       .gte("scanned_at", dayStart.toISOString())
       .lt("scanned_at", dayEnd.toISOString())
@@ -531,6 +550,7 @@ function handleRFIDScan(uid) {
         fullname: student.fullname,
         grade: student.grade,
         section: student.section,
+        teachers_id: activeTeacherId,
         scanned_at: timestamp,
       },
     ]);
@@ -641,6 +661,7 @@ app.get("/api/scanner/last-capture", (req, res) => {
 // Endpoint to activate scanning mode for a client
 app.post("/api/scanner/activate", (req, res) => {
   const { clientId } = req.body;
+  const teachersId = getNormalizedTeacherId(req.body?.teachers_id);
   if (!clientId) {
     return res.status(400).json({ error: "clientId required" });
   }
@@ -651,59 +672,83 @@ app.post("/api/scanner/activate", (req, res) => {
   }
   client.scanningActive = true;
   scannerModeEnabled = true;
-  res.json({ message: "Scanning activated" });
+  if (teachersId) {
+    scannerModeTeacherId = teachersId;
+  }
+  res.json({
+    message: "Scanning activated",
+    teachers_id: scannerModeTeacherId,
+  });
 });
 
 app.get("/api/scanner/state", (req, res) => {
   res.json({
     enabled: scannerModeEnabled,
+    teachers_id: scannerModeTeacherId || null,
     activeClients: sseClients.length,
   });
 });
 
 app.post("/api/scanner/start", (req, res) => {
+  const teachersId = getNormalizedTeacherId(req.body?.teachers_id);
+  if (!teachersId) {
+    return res.status(400).json({ error: "teachers_id is required" });
+  }
+
   scannerModeEnabled = true;
+  scannerModeTeacherId = teachersId;
   console.log("▶️ Scanner mode enabled");
-  res.json({ enabled: true });
+  res.json({ enabled: true, teachers_id: scannerModeTeacherId });
 });
 
 app.post("/api/scanner/stop", (req, res) => {
   scannerModeEnabled = false;
+  scannerModeTeacherId = "";
   console.log("⏹️ Scanner mode disabled");
   res.json({ enabled: false });
 });
 
 // Teacher sign in
 app.post("/api/auth/signin", (req, res) => {
-  const email = String(req.body?.email || "")
-    .trim()
-    .toLowerCase();
+  const identifier = String(
+    req.body?.identifier || req.body?.email || "",
+  ).trim();
   const password = String(req.body?.password || "");
 
-  if (!email || !password) {
-    return res.status(400).json({ error: "Email and password are required" });
+  if (!identifier || !password) {
+    return res
+      .status(400)
+      .json({ error: "Email or Teacher ID and password are required" });
   }
 
   (async () => {
-    const { data: teachers, error } = await supabase
+    const isEmailLogin = identifier.includes("@");
+    const lookupValue = isEmailLogin ? identifier.toLowerCase() : identifier;
+
+    let query = supabase
       .from("teachers")
-      .select("id, teachers_id, fullname, email, password")
-      .eq("email", email)
-      .limit(1);
+      .select("id, teachers_id, fullname, email, password");
+
+    query = isEmailLogin
+      ? query.eq("email", lookupValue)
+      : query.eq("teachers_id", lookupValue);
+
+    const { data: teacher, error } = await query.maybeSingle();
 
     if (error) {
       return res.status(500).json({ error: "Failed to process sign in" });
     }
 
-    const teacher =
-      Array.isArray(teachers) && teachers.length > 0 ? teachers[0] : null;
-
     if (!teacher) {
-      return res.status(401).json({ error: "Invalid email or password" });
+      return res
+        .status(401)
+        .json({ error: "Invalid email/teacher ID or password" });
     }
 
     if (String(teacher.password || "") !== password) {
-      return res.status(401).json({ error: "Invalid email or password" });
+      return res
+        .status(401)
+        .json({ error: "Invalid email/teacher ID or password" });
     }
 
     return res.json({
@@ -721,10 +766,17 @@ app.post("/api/auth/signin", (req, res) => {
 
 // Get all students
 app.get("/api/students", (req, res) => {
+  const teachersId = getNormalizedTeacherId(req.query?.teachers_id);
+
+  if (!teachersId) {
+    return res.status(400).json({ error: "teachers_id is required" });
+  }
+
   (async () => {
     const { data: students, error } = await supabase
       .from("students")
-      .select("*");
+      .select("*")
+      .eq("teachers_id", teachersId);
     if (error) {
       return res.status(500).json({ error: "Failed to fetch students" });
     }
@@ -735,9 +787,17 @@ app.get("/api/students", (req, res) => {
 // Register new student
 app.post("/api/students", (req, res) => {
   const { student_id, card_uid, fullname, grade, section } = req.body;
+  const teachersId = getNormalizedTeacherId(req.body?.teachers_id);
 
   // Validation
-  if (!student_id || !card_uid || !fullname || !grade || !section) {
+  if (
+    !student_id ||
+    !card_uid ||
+    !fullname ||
+    !grade ||
+    !section ||
+    !teachersId
+  ) {
     return res.status(400).json({ error: "All fields are required" });
   }
 
@@ -746,7 +806,14 @@ app.post("/api/students", (req, res) => {
     const { data: students, error } = await supabase
       .from("students")
       .select("*")
+      .eq("teachers_id", teachersId)
       .or(`student_id.eq.${student_id},card_uid.eq.${card_uid}`);
+
+    if (error) {
+      return res
+        .status(500)
+        .json({ error: "Failed to validate student record" });
+    }
 
     if (students && students.find((s) => s.student_id === student_id)) {
       return res.status(409).json({ error: "Student ID already exists" });
@@ -767,6 +834,7 @@ app.post("/api/students", (req, res) => {
           fullname,
           grade,
           section,
+          teachers_id: teachersId,
           registered_date: isoDate,
         },
       ])
@@ -785,11 +853,20 @@ app.post("/api/students", (req, res) => {
 
 // Get attendance history
 app.get("/api/attendance", (req, res) => {
+  const teachersId = getNormalizedTeacherId(req.query?.teachers_id);
+
+  if (!teachersId) {
+    return res.status(400).json({ error: "teachers_id is required" });
+  }
+
   (async () => {
-    const { data: attendance, error } = await supabase
-      .from("attendance")
-      .select("*")
-      .order("scanned_at", { ascending: false });
+    let query = supabase.from("attendance").select("*");
+
+    query = query.eq("teachers_id", teachersId);
+
+    const { data: attendance, error } = await query.order("scanned_at", {
+      ascending: false,
+    });
 
     if (error) {
       return res.status(500).json({ error: "Failed to fetch attendance" });
@@ -802,9 +879,17 @@ app.get("/api/attendance", (req, res) => {
 // Get attendance history with filters
 app.get("/api/attendance/filter", (req, res) => {
   const { date, student_id, grade, section } = req.query;
+  const teachersId = getNormalizedTeacherId(req.query?.teachers_id);
+
+  if (!teachersId) {
+    return res.status(400).json({ error: "teachers_id is required" });
+  }
 
   (async () => {
-    let query = supabase.from("attendance").select("*");
+    let query = supabase
+      .from("attendance")
+      .select("*")
+      .eq("teachers_id", teachersId);
 
     if (date) {
       const dayStart = new Date(`${date}T00:00:00`);
@@ -842,9 +927,14 @@ app.get("/api/attendance/filter", (req, res) => {
 // Get today's latest attendance record by card UID
 app.get("/api/attendance/today-by-uid/:uid", (req, res) => {
   const normalizedUid = normalizeUid(req.params.uid);
+  const teachersId = getNormalizedTeacherId(req.query?.teachers_id);
 
   if (!normalizedUid) {
     return res.status(400).json({ error: "Valid UID is required" });
+  }
+
+  if (!teachersId) {
+    return res.status(400).json({ error: "teachers_id is required" });
   }
 
   (async () => {
@@ -856,6 +946,7 @@ app.get("/api/attendance/today-by-uid/:uid", (req, res) => {
     const { data: attendance, error } = await supabase
       .from("attendance")
       .select("*")
+      .eq("teachers_id", teachersId)
       .eq("card_uid", normalizedUid)
       .gte("scanned_at", dayStart.toISOString())
       .lt("scanned_at", dayEnd.toISOString())
@@ -880,9 +971,17 @@ app.get("/api/attendance/today-by-uid/:uid", (req, res) => {
 // Export attendance as CSV
 app.get("/api/attendance/export", (req, res) => {
   const { date, student_id, grade, section } = req.query;
+  const teachersId = getNormalizedTeacherId(req.query?.teachers_id);
+
+  if (!teachersId) {
+    return res.status(400).json({ error: "teachers_id is required" });
+  }
 
   (async () => {
-    let query = supabase.from("attendance").select("*");
+    let query = supabase
+      .from("attendance")
+      .select("*")
+      .eq("teachers_id", teachersId);
 
     if (date) {
       const dayStart = new Date(`${date}T00:00:00`);
@@ -966,13 +1065,25 @@ app.post("/api/test-scan", (req, res) => {
 
 // Get stats
 app.get("/api/stats", (req, res) => {
+  const teachersId = getNormalizedTeacherId(req.query?.teachers_id);
+
+  if (!teachersId) {
+    return res.status(400).json({ error: "teachers_id is required" });
+  }
+
   (async () => {
     const todayStart = new Date();
     todayStart.setHours(0, 0, 0, 0);
 
+    let studentsQuery = supabase.from("students").select("id");
+    let scansQuery = supabase.from("attendance").select("scanned_at");
+
+    studentsQuery = studentsQuery.eq("teachers_id", teachersId);
+    scansQuery = scansQuery.eq("teachers_id", teachersId);
+
     const [studentsResult, scansResult] = await Promise.all([
-      supabase.from("students").select("id"),
-      supabase.from("attendance").select("scanned_at"),
+      studentsQuery,
+      scansQuery,
     ]);
 
     if (studentsResult.error || scansResult.error) {
