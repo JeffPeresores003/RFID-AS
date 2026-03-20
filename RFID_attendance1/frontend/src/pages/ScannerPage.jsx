@@ -89,8 +89,8 @@ export default function ScannerPage() {
   const scanningStateRef = useRef(false);
   const scanSessionStartedAtRef = useRef(0);
   const lastNotifiedScanKeyRef = useRef("");
-  const lastDuplicateNoticeRef = useRef({ uid: "", at: 0 });
-  const lastProcessedCaptureKeyRef = useRef("");
+  const lastShownDuplicateRef = useRef({ uid: "", at: 0 });
+  const lastProcessedCaptureRef = useRef(null); // Track exact capture (uid + timestamp) to avoid reprocessing
 
   const toScanKey = (scan) =>
     `${scan?.student_id || ""}|${scan?.scanned_at || ""}|${scan?.card_uid || ""}`;
@@ -131,19 +131,22 @@ export default function ScannerPage() {
 
   const showDuplicateNotice = (scanRecord) => {
     if (!scanRecord) return;
-    presentScanResult({
-      status: "duplicate",
-      message: "Already scanned today",
-      student: {
-        student_id: scanRecord.student_id,
-        fullname: scanRecord.fullname,
-        grade: scanRecord.grade,
-        section: scanRecord.section,
-        card_uid: scanRecord.card_uid,
+    presentScanResult(
+      {
+        status: "duplicate",
+        message: "Already scanned today",
+        student: {
+          student_id: scanRecord.student_id,
+          fullname: scanRecord.fullname,
+          grade: scanRecord.grade,
+          section: scanRecord.section,
+          card_uid: scanRecord.card_uid,
+        },
+        previous_scan: scanRecord.scanned_at,
+        timestamp: new Date().toISOString(),
       },
-      previous_scan: scanRecord.scanned_at,
-      timestamp: new Date().toISOString(),
-    });
+      true, // skipSound = true for duplicates
+    );
   };
 
   const refreshTodayAndFindUid = async (uid) => {
@@ -240,34 +243,8 @@ export default function ScannerPage() {
   };
 
   const handleCapturedUid = async (uid, timestamp = "") => {
-    const capturedUid = normalizeUid(uid);
-    if (!capturedUid) return;
-
-    const captureKey = `${capturedUid}|${timestamp || ""}`;
-    if (captureKey && captureKey === lastProcessedCaptureKeyRef.current) {
-      return;
-    }
-    if (captureKey) {
-      lastProcessedCaptureKeyRef.current = captureKey;
-    }
-
-    const now = Date.now();
-    const lastNotice = lastDuplicateNoticeRef.current;
-    const withinCooldown =
-      lastNotice.uid === capturedUid && now - lastNotice.at < 1500;
-    if (withinCooldown) {
-      return;
-    }
-
-    let existingScan = findTodayScanByUid(capturedUid);
-    if (!existingScan) {
-      existingScan = await refreshTodayAndFindUid(capturedUid);
-    }
-
-    if (existingScan) {
-      lastDuplicateNoticeRef.current = { uid: capturedUid, at: now };
-      showDuplicateNotice(existingScan);
-    }
+    // This function is no longer used. Duplicate detection is now
+    // handled only by the backend's explicit success/duplicate events.
   };
 
   const startCapturePolling = () => {
@@ -300,15 +277,50 @@ export default function ScannerPage() {
           return;
         }
 
-        await handleCapturedUid(payload.uid, payload.timestamp || "");
+        // Polling fallback: check if this UID is already in today's scans
+        const normalizedUid = normalizeUid(payload.uid);
+
+        // Check if this is the exact same capture we already processed (avoids reprocessing same hardware event)
+        const captureKey = `${normalizedUid}|${payload.timestamp || 0}`;
+        const lastCapture = lastProcessedCaptureRef.current;
+        if (lastCapture === captureKey) {
+          // Same capture we already handled, skip
+          return;
+        }
+        // Mark this capture as processed
+        lastProcessedCaptureRef.current = captureKey;
+
+        const now = Date.now();
+
+        const existingScan = findTodayScanByUid(normalizedUid);
+        if (existingScan) {
+          // Dedup: only show duplicate notice once per card (with 2s cooldown)
+          const lastShown = lastShownDuplicateRef.current;
+          if (lastShown.uid === normalizedUid && now - lastShown.at < 2000) {
+            // Already shown this duplicate recently, skip
+            return;
+          }
+
+          // Mark this duplicate as shown
+          lastShownDuplicateRef.current = { uid: normalizedUid, at: now };
+
+          showDuplicateNotice(existingScan);
+          return;
+        }
+
+        // Polling is just a fallback for missed SSE messages.
+        // The backend's success/duplicate event determines the outcome.
+        // Don't do duplicate checking here.
       } catch {
         // Keep polling in background while scanning is active.
       }
     }, 700);
   };
 
-  const presentScanResult = (data) => {
-    playTone();
+  const presentScanResult = (data, skipSound = false) => {
+    if (!skipSound) {
+      playTone(); // Only play tone for new successful scans, not duplicates
+    }
     setLastScan({ data, fading: false });
 
     clearLastScanTimers();
@@ -414,7 +426,9 @@ export default function ScannerPage() {
       }
     }
 
-    presentScanResult(data);
+    // Skip sound for duplicates, play for success/error
+    const skipSound = data.status === "duplicate";
+    presentScanResult(data, skipSound);
 
     loadTodayScans();
   };
@@ -424,7 +438,6 @@ export default function ScannerPage() {
 
     scanningStateRef.current = true;
     scanSessionStartedAtRef.current = Date.now();
-    lastProcessedCaptureKeyRef.current = "";
     setIsActivated(false);
     setIsScanning(true);
     setConnectionState("connecting");
@@ -471,8 +484,8 @@ export default function ScannerPage() {
       }
 
       if (data.status === "capture") {
-        await handleCapturedUid(data.uid, data.timestamp || "");
-
+        // Capture events are just UID detection signals.
+        // Let the backend's success/duplicate response determine the outcome.
         return;
       }
 
@@ -504,6 +517,7 @@ export default function ScannerPage() {
   const stopScanning = async () => {
     scanningStateRef.current = false;
     scanSessionStartedAtRef.current = 0;
+    lastShownDuplicateRef.current = { uid: "", at: 0 };
     setIsScanning(false);
     setIsActivated(false);
     setConnectionState("idle");
