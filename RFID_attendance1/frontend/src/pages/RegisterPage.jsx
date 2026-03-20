@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { API_BASE } from "../config";
+import { getTeacherSession } from "../auth";
 
 const initialForm = {
   student_id: "",
@@ -10,6 +11,9 @@ const initialForm = {
 };
 
 export default function RegisterPage() {
+  const teacher = getTeacherSession();
+  const teacherId = String(teacher?.teachers_id || "").trim();
+
   const [formData, setFormData] = useState(initialForm);
   const [students, setStudents] = useState([]);
   const [submitting, setSubmitting] = useState(false);
@@ -55,11 +59,23 @@ export default function RegisterPage() {
   }, [students, studentSearch, gradeFilter]);
 
   useEffect(() => {
+    if (!teacherId) {
+      setStudents([]);
+      setAlert({
+        type: "error",
+        message: "No teacher session found. Please sign in again.",
+      });
+      return;
+    }
+
     let mounted = true;
 
     const loadStudents = async () => {
       try {
-        const response = await fetch(`${API_BASE}/students`);
+        const query = new URLSearchParams({
+          teachers_id: teacherId,
+        }).toString();
+        const response = await fetch(`${API_BASE}/students?${query}`);
         if (!response.ok) throw new Error("Failed to load students");
         const payload = await response.json();
         if (mounted) setStudents(Array.isArray(payload) ? payload : []);
@@ -89,7 +105,7 @@ export default function RegisterPage() {
         fallbackPollRef.current = null;
       }
     };
-  }, []);
+  }, [teacherId]);
 
   useEffect(() => {
     if (!alert.message) return undefined;
@@ -199,13 +215,22 @@ export default function RegisterPage() {
 
   const handleSubmit = async (event) => {
     event.preventDefault();
+
+    if (!teacherId) {
+      setAlert({
+        type: "error",
+        message: "No teacher session found. Please sign in again.",
+      });
+      return;
+    }
+
     setSubmitting(true);
 
     try {
       const response = await fetch(`${API_BASE}/students`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(formData),
+        body: JSON.stringify({ ...formData, teachers_id: teacherId }),
       });
 
       const result = await response.json();
@@ -225,7 +250,8 @@ export default function RegisterPage() {
       setFormData(initialForm);
       stopUIDCapture();
 
-      const studentsResponse = await fetch(`${API_BASE}/students`);
+      const query = new URLSearchParams({ teachers_id: teacherId }).toString();
+      const studentsResponse = await fetch(`${API_BASE}/students?${query}`);
       const studentsPayload = await studentsResponse.json();
       setStudents(Array.isArray(studentsPayload) ? studentsPayload : []);
     } catch {
