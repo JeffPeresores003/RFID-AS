@@ -79,10 +79,38 @@ const ARDUINO_HINTS = [
   "usb2.0-serial",
 ];
 const ARDUINO_VENDOR_IDS = new Set(["2341", "2a03", "1a86", "10c4"]);
+const LOCAL_TIMEZONE_OFFSET_MINUTES = Number(
+  process.env.LOCAL_TIMEZONE_OFFSET_MINUTES || 480,
+);
 
 function normalizeUid(raw) {
   if (!raw || typeof raw !== "string") return "";
   return raw.trim().toUpperCase().replace(/[-:]+/g, " ").replace(/\s+/g, " ");
+}
+
+function getLocalDayRange(dateInput = "") {
+  const offsetMs = LOCAL_TIMEZONE_OFFSET_MINUTES * 60 * 1000;
+
+  let year;
+  let month;
+  let day;
+
+  if (typeof dateInput === "string" && /^\d{4}-\d{2}-\d{2}$/.test(dateInput)) {
+    [year, month, day] = dateInput.split("-").map(Number);
+  } else {
+    const localNow = new Date(Date.now() + offsetMs);
+    year = localNow.getUTCFullYear();
+    month = localNow.getUTCMonth() + 1;
+    day = localNow.getUTCDate();
+  }
+
+  const localMidnightUtcMs = Date.UTC(year, month - 1, day) - offsetMs;
+  const localNextMidnightUtcMs = localMidnightUtcMs + 24 * 60 * 60 * 1000;
+
+  return {
+    dayStartIso: new Date(localMidnightUtcMs).toISOString(),
+    dayEndIso: new Date(localNextMidnightUtcMs).toISOString(),
+  };
 }
 
 function extractUidFromSerialData(trimmedData) {
@@ -552,18 +580,15 @@ function handleRFIDScan(uid) {
     }
 
     // Check for duplicate scan on the same local day.
-    const dayStart = new Date();
-    dayStart.setHours(0, 0, 0, 0);
-    const dayEnd = new Date(dayStart);
-    dayEnd.setDate(dayEnd.getDate() + 1);
+    const { dayStartIso, dayEndIso } = getLocalDayRange();
 
     const { data: attendance, error: attendanceError } = await supabase
       .from("attendance")
       .select("*")
       .eq("teachers_id", activeTeacherId)
       .eq("card_uid", normalizedUid)
-      .gte("scanned_at", dayStart.toISOString())
-      .lt("scanned_at", dayEnd.toISOString())
+      .gte("scanned_at", dayStartIso)
+      .lt("scanned_at", dayEndIso)
       .order("scanned_at", { ascending: false })
       .limit(1);
 
@@ -1288,12 +1313,8 @@ app.get("/api/attendance/filter", (req, res) => {
       .eq("teachers_id", teachersId);
 
     if (date) {
-      const dayStart = new Date(`${date}T00:00:00`);
-      const dayEnd = new Date(dayStart);
-      dayEnd.setDate(dayEnd.getDate() + 1);
-      query = query
-        .gte("scanned_at", dayStart.toISOString())
-        .lt("scanned_at", dayEnd.toISOString());
+      const { dayStartIso, dayEndIso } = getLocalDayRange(String(date));
+      query = query.gte("scanned_at", dayStartIso).lt("scanned_at", dayEndIso);
     }
 
     if (student_id) {
@@ -1334,18 +1355,15 @@ app.get("/api/attendance/today-by-uid/:uid", (req, res) => {
   }
 
   (async () => {
-    const dayStart = new Date();
-    dayStart.setHours(0, 0, 0, 0);
-    const dayEnd = new Date(dayStart);
-    dayEnd.setDate(dayEnd.getDate() + 1);
+    const { dayStartIso, dayEndIso } = getLocalDayRange();
 
     const { data: attendance, error } = await supabase
       .from("attendance")
       .select("*")
       .eq("teachers_id", teachersId)
       .eq("card_uid", normalizedUid)
-      .gte("scanned_at", dayStart.toISOString())
-      .lt("scanned_at", dayEnd.toISOString())
+      .gte("scanned_at", dayStartIso)
+      .lt("scanned_at", dayEndIso)
       .order("scanned_at", { ascending: false })
       .limit(1);
 
@@ -1380,12 +1398,8 @@ app.get("/api/attendance/export", (req, res) => {
       .eq("teachers_id", teachersId);
 
     if (date) {
-      const dayStart = new Date(`${date}T00:00:00`);
-      const dayEnd = new Date(dayStart);
-      dayEnd.setDate(dayEnd.getDate() + 1);
-      query = query
-        .gte("scanned_at", dayStart.toISOString())
-        .lt("scanned_at", dayEnd.toISOString());
+      const { dayStartIso, dayEndIso } = getLocalDayRange(String(date));
+      query = query.gte("scanned_at", dayStartIso).lt("scanned_at", dayEndIso);
     }
     if (student_id) {
       query = query.eq("student_id", student_id);
